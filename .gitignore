@@ -1,0 +1,16 @@
+# Flutter/Dart project root ignores
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
