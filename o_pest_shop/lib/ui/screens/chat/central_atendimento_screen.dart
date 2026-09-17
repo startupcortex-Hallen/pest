@@ -110,13 +110,15 @@ class _CentralAtendimentoScreenState extends State<CentralAtendimentoScreen> {
   Widget _buildConversaItem(Map<String, dynamic> conv) {
     final perfil = conv['perfis'] as Map?;
     final unidade = conv['unidades'] as Map?;
-    final nomeCliente = perfil?['nome'] as String? ?? 'Cliente';
+    final nomeBruto = (perfil?['nome'] as String?)?.trim() ?? '';
+    final nomeCliente = nomeBruto.isEmpty ? 'Cliente' : nomeBruto;
     final avatarUrl = perfil?['avatar_url'] as String?;
     final ultimaMsg = conv['ultima_mensagem'] as String? ?? '';
     final updatedAt = conv['updated_at'] as String? ?? conv['created_at'] as String? ?? '';
     final hora = updatedAt.length >= 16 ? updatedAt.substring(11, 16) : '';
     final unidadeNome = unidade?['nome'] as String? ?? '';
-    final conversaId = conv['id'] as int;
+    final conversaId = (conv['id'] as num?)?.toInt();
+    if (conversaId == null) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(
@@ -149,7 +151,7 @@ class _CentralAtendimentoScreenState extends State<CentralAtendimentoScreen> {
           ],
         ),
         trailing: Text(hora, style: const TextStyle(fontSize: 11, color: Color(0xFF9C9C9C))),
-        onTap: () => context.push('/chat/$conversaId/$nomeCliente'),
+        onTap: () => context.push('/chat/$conversaId/${Uri.encodeComponent(nomeCliente)}'),
       ),
     );
   }

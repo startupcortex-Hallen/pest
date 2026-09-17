@@ -49,6 +49,7 @@ class _AreaEntregadorScreenState extends State<AreaEntregadorScreen> {
   }
 
   Future<void> _carregar() async {
+    if (!mounted) return;
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
     _isAdmin = user.funcao == 'admin';

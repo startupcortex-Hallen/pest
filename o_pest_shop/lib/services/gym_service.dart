@@ -17,7 +17,9 @@ class GymService {
 
   Future<void> inscreverAula(int aulaId, String userId, String data) async {
     await _client.from('aulas_inscricao').insert({'aula_id': aulaId, 'user_id': userId, 'data_aula': data});
-    await _client.from('aulas').update({'vagas_ocupadas': _client.rpc('increment')}).eq('id', aulaId);
+    final atual = await _client.from('aulas').select('vagas_ocupadas').eq('id', aulaId).maybeSingle();
+    final vagas = (atual?['vagas_ocupadas'] as num?)?.toInt() ?? 0;
+    await _client.from('aulas').update({'vagas_ocupadas': vagas + 1}).eq('id', aulaId);
   }
 
   // PERSONAL
@@ -95,7 +97,9 @@ class GymService {
 
   Future<void> criarIndicacao(String userId, String indicadoId, String codigo) async {
     await _client.from('indicacoes').insert({'usuario_id': userId, 'indicado_id': indicadoId, 'codigo_indicacao': codigo, 'pontos_ganhos': 50});
-    await _client.from('perfis').update({'pontos': _client.rpc('increment')}).eq('id', userId);
+    final perfil = await _client.from('perfis').select('pontos').eq('id', userId).maybeSingle();
+    final pontos = (perfil?['pontos'] as num?)?.toInt() ?? 0;
+    await _client.from('perfis').update({'pontos': pontos + 50}).eq('id', userId);
   }
 
   // DASHBOARD

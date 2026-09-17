@@ -22,7 +22,7 @@ class _AulasScreenState extends State<AulasScreen> {
   List<bool> _inscrito = [];
   bool _loading = true;
   final _dias = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'];
-  String _diaSelecionado = DateTime.now().weekday <= 7 ? ['dom','seg','ter','qua','qui','sex','sab'][DateTime.now().weekday] : 'seg';
+  String _diaSelecionado = const ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][DateTime.now().weekday % 7];
 
   @override
   void initState() { super.initState(); _carregar(); }

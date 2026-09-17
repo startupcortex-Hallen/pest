@@ -54,7 +54,7 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 18, vsync: this);
+    _tabCtrl = TabController(length: 11, vsync: this);
     _tabCtrl.addListener(() {
       if (!_tabCtrl.indexIsChanging) _loadTabData(_tabCtrl.index);
     });

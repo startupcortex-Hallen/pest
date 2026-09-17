@@ -1,8 +1,8 @@
 ﻿import 'dart:convert';
-import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
@@ -74,31 +74,24 @@ class _CartScreenState extends State<CartScreen> {
     }
     setState(() => _buscandoCep = true);
     try {
-      final client = HttpClient();
-      try {
-        final req = await client.getUrl(Uri.parse('https://viacep.com.br/ws/$cep/json/'));
-        final res = await req.close();
-        final body = await res.transform(utf8.decoder).join();
-        final json = jsonDecode(body);
-        if (json is Map && json['erro'] == true) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('CEP não encontrado.'), backgroundColor: AppColors.error),
-            );
-          }
-          return;
-        }
-        final dados = json as Map<String, dynamic>;
+      final res = await http.get(Uri.parse('https://viacep.com.br/ws/$cep/json/'));
+      final json = jsonDecode(utf8.decode(res.bodyBytes));
+      if (json is Map && json['erro'] == true) {
         if (mounted) {
-          setState(() {
-            _ruaCtrl.text = dados['logradouro'] as String? ?? '';
-            _bairroCtrl.text = dados['bairro'] as String? ?? '';
-            _cidadeCtrl.text = dados['localidade'] as String? ?? '';
-            _ufCtrl.text = dados['uf'] as String? ?? '';
-          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CEP não encontrado.'), backgroundColor: AppColors.error),
+          );
         }
-      } finally {
-        client.close();
+        return;
+      }
+      final dados = json as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _ruaCtrl.text = dados['logradouro'] as String? ?? '';
+          _bairroCtrl.text = dados['bairro'] as String? ?? '';
+          _cidadeCtrl.text = dados['localidade'] as String? ?? '';
+          _ufCtrl.text = dados['uf'] as String? ?? '';
+        });
       }
     } catch (_) {
       if (mounted) {

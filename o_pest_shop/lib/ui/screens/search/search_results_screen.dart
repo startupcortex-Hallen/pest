@@ -67,6 +67,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
       final cats = await _produtoService.fetchCategorias();
       final marcas = await Supabase.instance.client.from('marcas').select('id, nome').order('nome');
       final unidades = await Supabase.instance.client.from('unidades').select('id, nome, foto_url').order('nome');
+      if (!mounted) return;
       setState(() {
         _categorias = cats.map((c) => {'id': c.id, 'nome': c.nome}).toList();
         _marcas = (marcas as List).cast<Map<String, dynamic>>();
@@ -147,6 +148,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
         });
       }
 
+      if (!mounted) return;
       setState(() {
         if (loadMore) {
           _results = [..._results, ...filtrados];
@@ -159,6 +161,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
       });
 
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Erro ao buscar produtos';
         _loading = false;

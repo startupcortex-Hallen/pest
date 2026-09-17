@@ -1,5 +1,4 @@
-﻿import 'dart:io';
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
@@ -236,7 +235,7 @@ class _VagaDetailScreenState extends State<VagaDetailScreen> {
             const SizedBox(height: 8),
             GestureDetector(
               onTap: () async {
-                final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+                final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
                 if (r != null && r.files.isNotEmpty) setSheetState(() => pdfSelecionado = r.files.first);
               },
               child: Container(
@@ -260,12 +259,7 @@ class _VagaDetailScreenState extends State<VagaDetailScreen> {
                 setSheetState(() => enviando = true);
                 try {
                   String? urlCurriculo;
-                  Uint8List? conteudo;
-                  if (pdfSelecionado!.bytes != null) {
-                    conteudo = pdfSelecionado!.bytes;
-                  } else if (pdfSelecionado!.path != null) {
-                    conteudo = await File(pdfSelecionado!.path!).readAsBytes();
-                  }
+                  final Uint8List? conteudo = pdfSelecionado!.bytes;
                   if (conteudo != null) {
                     final fileName = 'curriculo_${_userId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
                     await Supabase.instance.client.storage.from('Curriculos').uploadBinary(fileName, conteudo, fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true));
@@ -273,7 +267,7 @@ class _VagaDetailScreenState extends State<VagaDetailScreen> {
                   }
                   await _feedService.submitCandidatura({'vaga_id': widget.postId, 'user_id': _userId, 'nome': nomeCtrl.text.trim(), 'email': emailCtrl.text.trim(), 'telefone': telefoneCtrl.text.trim(), 'url_curriculo': urlCurriculo});
                   if (ctx.mounted) Navigator.pop(ctx);
-                  setState(() => _jaCandidatou = true);
+                  if (mounted) setState(() => _jaCandidatou = true);
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Candidatura enviada com sucesso!')));
                 } catch (e) {
                   setSheetState(() => enviando = false);

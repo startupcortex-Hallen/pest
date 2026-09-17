@@ -26,7 +26,9 @@ class FavoritoService {
 
     if (response is! List) return [];
     return response
-        .map((json) => (json as Map<String, dynamic>)['produto_id'] as int)
+        .map((json) => (json as Map<String, dynamic>)['produto_id'])
+        .whereType<num>()
+        .map((id) => id.toInt())
         .toList();
   }
 

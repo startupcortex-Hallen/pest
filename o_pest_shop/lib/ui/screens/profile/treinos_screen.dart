@@ -37,21 +37,31 @@ class _TreinosScreenState extends State<TreinosScreen> {
         .select('*, exercicios(*)')
         .eq('user_id', userId)
         .order('ordem');
+      if (!mounted) return;
+      final treinos = <Treino>[];
+      final exercicios = <int, List<Exercicio>>{};
       if (r is List) {
         for (final t in r) {
           final treino = Treino.fromJson(t as Map<String, dynamic>);
-          _treinos.add(treino);
+          treinos.add(treino);
           final exs = (t['exercicios'] as List?) ?? [];
-          _exercicios[treino.id] = exs.map((e) => Exercicio.fromJson(e as Map<String, dynamic>)).toList();
+          exercicios[treino.id] = exs.map((e) => Exercicio.fromJson(e as Map<String, dynamic>)).toList();
         }
       }
-    } catch (e) { debugPrint('Erro treinos: $e'); }
-    if (mounted) setState(() => _loading = false);
+      setState(() {
+        _treinos = treinos;
+        _exercicios = exercicios;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Erro treinos: $e');
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _alternarConcluido(int exercicioId, bool atual) async {
     await Supabase.instance.client.from('exercicios').update({'concluido': !atual}).eq('id', exercicioId);
-    _carregar();
+    await _carregar();
   }
 
   String _nomeDia(String dia) {

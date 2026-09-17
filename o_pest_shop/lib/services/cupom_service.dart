@@ -36,11 +36,16 @@ class CupomService {
   }
 
   Future<void> usarCupom(int cupomId) async {
+    final atual = await _client
+        .from('cupons')
+        .select('usos_atuais')
+        .eq('id', cupomId)
+        .maybeSingle();
+    if (atual == null) return;
+    final usos = (atual['usos_atuais'] as num?)?.toInt() ?? 0;
     await _client
         .from('cupons')
-        .update({
-          'usos_atuais': _client.rpc('increment', params: {'row_id': cupomId}),
-        })
+        .update({'usos_atuais': usos + 1})
         .eq('id', cupomId);
   }
 }

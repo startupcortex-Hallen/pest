@@ -9,7 +9,7 @@ class NutritionService {
     final existente = await _client.from('agua_registro')
       .select('id, ml').eq('user_id', userId).eq('data', hoje).maybeSingle();
     if (existente != null) {
-      final total = (existente['ml'] as int) + ml;
+      final total = ((existente['ml'] as num?)?.toInt() ?? 0) + ml;
       await _client.from('agua_registro').update({'ml': total}).eq('id', existente['id'] as int);
     } else {
       await _client.from('agua_registro').insert({'user_id': userId, 'data': hoje, 'ml': ml});

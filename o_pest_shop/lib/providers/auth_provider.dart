@@ -13,10 +13,17 @@ class AuthProvider extends ChangeNotifier {
     _authSubscription = _authService.authStateChanges.listen(_onAuthStateChange);
   }
 
+  bool _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     _authSubscription?.cancel();
     super.dispose();
+  }
+
+  void _safeNotify() {
+    if (!_disposed) notifyListeners();
   }
 
   UserProfile? _user;
@@ -29,11 +36,11 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _user != null;
 
   void _onAuthStateChange(AuthState state) {
-    if (state.session != null && !_loading) {
+    if (state.session != null) {
       _loadProfile(state.session!.user.id);
     } else if (state.session == null) {
       _user = null;
-      notifyListeners();
+      _safeNotify();
     }
   }
 
@@ -63,6 +70,7 @@ class AuthProvider extends ChangeNotifier {
     if (_user != null) {
       AuthRefreshNotifier.instance.trigger();
     }
+    _safeNotify();
   }
 
   UserProfile _createFallbackProfile() {

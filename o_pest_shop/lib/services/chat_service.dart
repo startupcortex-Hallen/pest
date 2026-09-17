@@ -38,7 +38,8 @@ class ChatService {
         .select()
         .eq('conversa_id', conversaId)
         .order('created_at');
-    final mensagens = (r as List).cast<Map<String, dynamic>>();
+    if (r is! List) return [];
+    final mensagens = r.cast<Map<String, dynamic>>();
     // Busca perfil de cada remetente
     for (final m in mensagens) {
       await _preencherPerfil(m);
