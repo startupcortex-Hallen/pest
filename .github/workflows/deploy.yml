@@ -25,6 +25,7 @@ jobs:
           channel: stable
 
       - name: Build web
+        working-directory: o_pest_shop
         run: flutter build web --release --base-href /pest/
 
       - name: Upload artifact
