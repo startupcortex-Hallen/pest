@@ -10,7 +10,7 @@ class FavoritoService {
         .from('favoritos')
         .select()
         .eq('user_id', userId)
-        .order('created_at', ascending: false);
+        .order('id', ascending: false);
 
     if (response is! List) return [];
     return response

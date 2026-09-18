@@ -17,7 +17,7 @@ class NutritionService {
   }
 
   Future<List<Map<String, dynamic>>> fetchAssinaturas(String userId) async {
-    final r = await _client.from('assinaturas').select().eq('user_id', userId).order('created_at', ascending: false);
+    final r = await _client.from('assinaturas').select().eq('user_id', userId).order('id', ascending: false);
     return (r as List).cast<Map<String, dynamic>>();
   }
 

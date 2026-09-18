@@ -159,6 +159,8 @@ class _UsuariosTabState extends State<UsuariosTab> {
                                       items: const [
                                         DropdownMenuItem(value: 'usuario', child: Text('Usuário')),
                                         DropdownMenuItem(value: 'atendente', child: Text('Atendente')),
+                                        DropdownMenuItem(value: 'entregador', child: Text('Entregador')),
+                                        DropdownMenuItem(value: 'gestor', child: Text('Gestor')),
                                         DropdownMenuItem(value: 'admin', child: Text('Admin')),
                                       ],
                                       onChanged: (novaFuncao) {

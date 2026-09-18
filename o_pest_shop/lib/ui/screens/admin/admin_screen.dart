@@ -916,8 +916,10 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
                                             context,
                                           MaterialPageRoute(builder: (_) => ProdutoFormScreen(produto: {
                                             'id': p.id, 'nome': p.nome, 'descricao': p.descricao,
-                                            'preco': p.preco, 'categoria_id': p.categoriaId,
+                                            'preco': p.preco, 'preco_promocional': p.precoPromocional,
+                                            'categoria_id': p.categoriaId,
                                             'marca_id': p.marcaId, 'em_promocao': p.emPromocao,
+                                            'cores': p.cores,
                                             'url_imagem': p.urlImagem.isNotEmpty ? p.urlImagem : null, 'estoque': p.estoque,
                                             'unidade_id': p.unidadeId,
                                           })),
@@ -1924,6 +1926,8 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
       } else {
         // Usa unidade selecionada no diálogo, ou fallback para a do usuário
         result['unidade_id'] = result['unidade_id'] ?? context.read<AuthProvider>().user?.unidadeId?.toString();
+        // Sem user_id o post fica sem autor (o join perfis(nome) vinha nulo)
+        result['user_id'] = Supabase.instance.client.auth.currentUser?.id;
         await _adminService.insertPost(result);
       }
       _posts = await _adminService.fetchPosts();
@@ -2578,6 +2582,17 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
       if (unidades is List) {
         for (final u in unidades) {
           final url = (u as Map)['foto_url'] as String?;
+          if (url != null && url.contains('/Produtos/')) {
+            urlsUsadas.add(url.split('/Produtos/').last);
+          }
+        }
+      }
+      // Protege imagens dos posts do feed (mesmo bucket) — antes eram
+      // classificadas como órfãs e apagadas, quebrando posts ativos.
+      final posts = await Supabase.instance.client.from('posts_feed').select('url_imagem');
+      if (posts is List) {
+        for (final p in posts) {
+          final url = (p as Map)['url_imagem'] as String?;
           if (url != null && url.contains('/Produtos/')) {
             urlsUsadas.add(url.split('/Produtos/').last);
           }
