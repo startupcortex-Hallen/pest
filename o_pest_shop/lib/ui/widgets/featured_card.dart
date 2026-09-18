@@ -46,6 +46,9 @@ class FeaturedCard extends StatelessWidget {
                       flightShuttleBuilder: (_, animation, direction, fromHeroContext, toHeroContext) {
                         // ENTRADA (push): voo limpo com Image puro (sem spinner/placeholder) —
                         // usa o mesmo cache da imagem do card para nunca piscar.
+                        // Sem foto não há o que animar — evita provider com URL vazia
+                        // (gerava voo transparente e o card ficava "preto").
+                        if (produto.urlImagem.isEmpty) return const SizedBox.shrink();
                         if (direction == HeroFlightDirection.push) {
                           return AnimatedBuilder(
                             animation: animation,
@@ -54,13 +57,14 @@ class FeaturedCard extends StatelessWidget {
                               final scale = 1.0 + (t - t * t) * 0.6;
                               return Transform.scale(
                                 scale: scale,
-                                child: Image(
-                                  image: CachedNetworkImageProvider(produto.urlImagem.isNotEmpty
-                                      ? produto.urlImagem.first
-                                      : ''),
+                                child: CachedNetworkImage(
+                                  imageUrl: produto.urlImagem.first,
                                   fit: BoxFit.contain,
-                                  gaplessPlayback: true,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  useOldImageOnUrlChange: true,
+                                  fadeInDuration: Duration.zero,
+                                  fadeOutDuration: Duration.zero,
+                                  placeholder: (_, __) => const SizedBox.shrink(),
+                                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
                                 ),
                               );
                             },
@@ -84,6 +88,10 @@ class FeaturedCard extends StatelessWidget {
                           ? CachedNetworkImage(
                               imageUrl: produto.urlImagem.first,
                               fit: BoxFit.contain,
+                              useOldImageOnUrlChange: true,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              memCacheWidth: 480,
                               placeholder: (_, __) => const Center(
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               ),

@@ -4,10 +4,15 @@ class AnimatedCardEntry extends StatefulWidget {
   final int index;
   final Widget child;
 
+  /// Quando false, o card já nasce visível (sem fade/slide). Use nos itens que
+  /// podem ser reciclados pelo ListView — evita a foto "sumir e voltar".
+  final bool animate;
+
   const AnimatedCardEntry({
     super.key,
     required this.index,
     required this.child,
+    this.animate = true,
   });
 
   @override
@@ -37,6 +42,11 @@ class _AnimatedCardEntryState extends State<AnimatedCardEntry>
       begin: const Offset(0, 0.3),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+
+    if (!widget.animate) {
+      _controller.value = 1;
+      return;
+    }
 
     final delay = Duration(
       milliseconds: (widget.index * 80).clamp(0, 400),

@@ -137,6 +137,9 @@ class _FeedCardState extends State<FeedCard> {
                         child: CachedNetworkImage(
                             imageUrl: widget.autorImagem!,
                             fit: BoxFit.cover,
+                            useOldImageOnUrlChange: true,
+                            fadeInDuration: Duration.zero,
+                            fadeOutDuration: Duration.zero,
                             errorWidget: (_, __, ___) => Icon(
                                 Icons.person_rounded,
                                 color: ThemeColors.hint(context),
@@ -208,6 +211,9 @@ class _FeedCardState extends State<FeedCard> {
                     CachedNetworkImage(
                       imageUrl: thumb,
                       fit: BoxFit.cover,
+                      useOldImageOnUrlChange: true,
+                      fadeInDuration: Duration.zero,
+                      fadeOutDuration: Duration.zero,
                       errorWidget: (_, __, ___) => Container(
                         color: ThemeColors.surfaceVariant(context),
                         child: const Icon(Icons.play_circle_outline, color: Colors.white70, size: 48),
@@ -266,6 +272,9 @@ class _FeedCardState extends State<FeedCard> {
                 imageUrl: widget.imagemUrl!,
                 width: double.infinity,
                 fit: BoxFit.cover,
+                useOldImageOnUrlChange: true,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
                 placeholder: (_, __) => Container(
                   color: ThemeColors.surface(context),
                 ),

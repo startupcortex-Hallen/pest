@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -412,10 +413,14 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                         itemBuilder: (context, i) {
                           Widget img = Container(
                             color: Colors.white,
-                            child: Image.network(
-                              p.urlImagem[i],
+                            child: CachedNetworkImage(
+                              imageUrl: p.urlImagem[i],
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
+                              useOldImageOnUrlChange: true,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              placeholder: (_, __) => const SizedBox.shrink(),
+                              errorWidget: (_, __, ___) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
                             ),
                           );
                           if (i == 0) {

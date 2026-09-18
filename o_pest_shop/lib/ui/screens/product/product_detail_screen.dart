@@ -356,6 +356,9 @@ return Scaffold(
                   child: CachedNetworkImage(
                     imageUrl: imagens[i],
                     fit: BoxFit.contain,
+                    useOldImageOnUrlChange: true,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
                     placeholder: (_, __) => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
                     errorWidget: (_, __, ___) => const Icon(Icons.image_outlined, size: 64, color: Color(0xFF9C9C9C)),
                   ),

@@ -46,6 +46,9 @@ class ProductCard extends StatelessWidget {
                       tag: 'produto_${produto.id}',
                       flightShuttleBuilder: (_, animation, direction, fromHeroContext, toHeroContext) {
                         // ENTRADA (push): voo limpo com Image puro (sem spinner/placeholder).
+                        // Sem foto não há o que animar — evita provider com URL vazia
+                        // (gerava voo transparente e o card ficava "preto").
+                        if (produto.urlImagem.isEmpty) return const SizedBox.shrink();
                         if (direction == HeroFlightDirection.push) {
                           return AnimatedBuilder(
                             animation: animation,
@@ -54,13 +57,14 @@ class ProductCard extends StatelessWidget {
                               final scale = 1.0 + (t - t * t) * 0.6;
                               return Transform.scale(
                                 scale: scale,
-                                child: Image(
-                                  image: CachedNetworkImageProvider(produto.urlImagem.isNotEmpty
-                                      ? produto.urlImagem.first
-                                      : ''),
+                                child: CachedNetworkImage(
+                                  imageUrl: produto.urlImagem.first,
                                   fit: BoxFit.contain,
-                                  gaplessPlayback: true,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  useOldImageOnUrlChange: true,
+                                  fadeInDuration: Duration.zero,
+                                  fadeOutDuration: Duration.zero,
+                                  placeholder: (_, __) => const SizedBox.shrink(),
+                                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
                                 ),
                               );
                             },
@@ -81,6 +85,10 @@ class ProductCard extends StatelessWidget {
                           ? CachedNetworkImage(
                               imageUrl: produto.urlImagem.first,
                               fit: BoxFit.contain,
+                              useOldImageOnUrlChange: true,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              memCacheWidth: 300,
                               placeholder: (_, __) => Container(
                                 color: Colors.white,
                                 child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),

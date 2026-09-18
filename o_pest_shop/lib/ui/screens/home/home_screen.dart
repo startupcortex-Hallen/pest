@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
@@ -326,6 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             itemBuilder: (context, index) {
               return AnimatedCardEntry(
                 index: index,
+                animate: index < 6,
                 child: FeaturedCard(
                   produto: produtos[index],
                   onTap: () => ProductDetailScreen.push(
@@ -394,6 +396,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             itemBuilder: (context, index) {
               return AnimatedCardEntry(
                 index: index,
+                animate: index < 6,
                 child: FeaturedCard(
                   produto: produtos[index],
                   onTap: () => ProductDetailScreen.push(
@@ -555,10 +558,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         itemBuilder: (context, i) {
                           Widget img = Container(
                             color: Colors.white,
-                            child: Image.network(
-                              p.urlImagem[i],
+                            child: CachedNetworkImage(
+                              imageUrl: p.urlImagem[i],
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
+                              useOldImageOnUrlChange: true,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              placeholder: (_, __) => const SizedBox.shrink(),
+                              errorWidget: (_, __, ___) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
                             ),
                           );
                           if (i == 0) {
