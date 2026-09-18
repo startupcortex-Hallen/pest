@@ -360,6 +360,31 @@ class _CartScreenState extends State<CartScreen> {
           if (cart.loading) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (cart.error != null && cart.items.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.cloud_off_rounded, color: ThemeColors.hint(context), size: 64),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                    child: Text(cart.error!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Verifique sua conexão e tente de novo',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: ThemeColors.secondaryText(context))),
+                  const SizedBox(height: AppSpacing.lg),
+                  ElevatedButton(
+                    onPressed: () => context.read<CartProvider>().loadCart(),
+                    child: const Text('Tentar novamente'),
+                  ),
+                ],
+              ),
+            );
+          }
           if (cart.items.isEmpty) {
             return Center(
               child: Column(

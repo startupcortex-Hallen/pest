@@ -8,7 +8,7 @@ class CartService {
   Future<List<CartItem>> fetchCart(String userId) async {
     final response = await _client
         .from('carrinho')
-        .select('*, produtos(nome, preco, preco_promocional, url_imagem, estoque, unidade_id, em_promocao, frete_gratis)')
+        .select('*, produtos(nome, preco, preco_promocional, url_imagem, estoque, unidade_id, em_promocao)')
         .eq('user_id', userId)
         .order('created_at', ascending: false);
 

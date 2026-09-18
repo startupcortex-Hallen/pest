@@ -11,9 +11,11 @@ class CartProvider extends ChangeNotifier {
 
   List<CartItem> _items = [];
   bool _loading = false;
+  String? _error;
 
   List<CartItem> get items => _items;
   bool get loading => _loading;
+  String? get error => _error;
   int get count => _items.length;
 
   /// Soma das quantidades (badge do carrinho, como nas grandes lojas).
@@ -41,8 +43,10 @@ class CartProvider extends ChangeNotifier {
     if (_items.isNotEmpty) {
       try {
         _items = await _cartService.fetchCart(uid);
+        _error = null;
       } catch (e) {
         debugPrint('Erro cart: $e');
+        _error = 'Não foi possível atualizar o carrinho.';
       }
       notifyListeners();
       return;
@@ -53,8 +57,10 @@ class CartProvider extends ChangeNotifier {
 
     try {
       _items = await _cartService.fetchCart(uid);
+      _error = null;
     } catch (e) {
       debugPrint('Erro cart: $e');
+      _error = 'Não foi possível carregar o carrinho. Tente novamente.';
       _items = [];
     }
 
@@ -69,9 +75,14 @@ class CartProvider extends ChangeNotifier {
     try {
       await _cartService.adicionar(uid, produtoId, quantidade: quantidade, cor: cor);
       await loadCart();
-      return true;
+      // Só confirma sucesso se a releitura deu certo e o item está na lista
+      // (antes retornava true mesmo com o fetch quebrado -> carrinho "vazio").
+      if (_error != null) return false;
+      return _items.any((i) => i.produtoId == produtoId);
     } catch (e) {
       debugPrint('Erro ao adicionar ao carrinho: $e');
+      _error = 'Não foi possível adicionar ao carrinho.';
+      notifyListeners();
       return false;
     }
   }
