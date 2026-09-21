@@ -87,11 +87,14 @@ class _CartoesScreenState extends State<CartoesScreen> {
           ElevatedButton(
             onPressed: () async {
               final provider = context.read<CartaoProvider>();
+              // Nunca gravar o número completo (PCI-DSS): salva apenas os 4 últimos.
+              final digitos = numeroCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+              final finais = digitos.length >= 4 ? digitos.substring(digitos.length - 4) : digitos;
               final cartao = CartaoCredito(
                 id: 0,
                 userId: provider.userId ?? '',
                 apelido: apelidoCtrl.text,
-                numeroMascarado: numeroCtrl.text,
+                numeroMascarado: finais.isEmpty ? '' : '**** **** **** $finais',
                 bandeira: _detectBandeira(numeroCtrl.text),
                 titular: titularCtrl.text,
                 mesValidade: int.tryParse(mesCtrl.text) ?? 1,
