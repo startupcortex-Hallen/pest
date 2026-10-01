@@ -20,6 +20,7 @@ import 'unidade_form_screen.dart';
 import 'admin_utils.dart';
 import 'tabs/assinaturas_tab.dart';
 import 'tabs/aulas_tab.dart';
+import 'tabs/candidaturas_tab.dart';
 import 'tabs/consultas_tab.dart';
 import 'tabs/desafios_tab.dart';
 import 'tabs/nutricao_tab.dart';
@@ -479,7 +480,7 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
     if (_tabCtrl.index == 0) return _buildProdutosTab();
     if (_tabCtrl.index == 1) return _buildCategoriasTab();
     if (_tabCtrl.index == 2) return _buildMarcasTab();
-    if (_tabCtrl.index == 3) return _buildCandidaturasTab();
+    if (_tabCtrl.index == 3) return const CandidaturasTab();
     if (_tabCtrl.index == 4) return _buildPostsTab();
     if (_tabCtrl.index == 5) return _buildUnidadesTab();
     if (_tabCtrl.index == 6) return _buildCuponsTab();
@@ -1108,95 +1109,6 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
               ),
             ],
           );
-  }
-
-  // ─── CANDIDATURAS TAB ───────────────────────────────
-
-  Widget _buildCandidaturasTab() {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _adminService.fetchCandidaturas(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Erro ao carregar: ${snapshot.error}', style: TextStyle(color: ThemeColors.error(context))));
-        }
-        final candidaturas = snapshot.data ?? [];
-        if (candidaturas.isEmpty) {
-          return Center(child: Text('Nenhuma candidatura recebida', style: TextStyle(color: ThemeColors.secondaryText(context))));
-        }
-        return ListView.builder(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          itemCount: candidaturas.length,
-          itemBuilder: (context, index) {
-            final c = candidaturas[index];
-            final vagaTitulo = c['vaga_titulo'] as String?;
-            return AnimatedCardEntry(
-              index: index,
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: ThemeColors.primary(context).withValues(alpha: 0.1),
-                  child: Text(( (c['nome'] as String? ?? '').isEmpty ? '?' : (c['nome'] as String? ?? '?')[0] ).toUpperCase(),
-                      style: TextStyle(color: ThemeColors.primary(context), fontWeight: FontWeight.bold)),
-                ),
-                title: Text(c['nome'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${c['email'] ?? ''}  •  ${c['telefone'] ?? ''}', style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context))),
-                    Text('Vaga: ${vagaTitulo ?? ''}', style: TextStyle(fontSize: 11, color: ThemeColors.hint(context))),
-                  ],
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (c['url_curriculo'] != null)
-                      IconButton(
-                        icon: Icon(Icons.download_rounded, color: ThemeColors.primary(context)),
-                        onPressed: () async {
-                          final uri = Uri.tryParse(c['url_curriculo'] as String);
-                          if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        },
-                      ),
-                    IconButton(
-                      icon: Icon(Icons.delete_outline_rounded, color: ThemeColors.error(context)),
-                      onPressed: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Excluir candidatura'),
-                            content: const Text('Tem certeza?'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-                              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Excluir', style: TextStyle(color: ThemeColors.error(ctx)))),
-                            ],
-                          ),
-                        );
-                        if (confirm != true) return;
-                        try {
-                          await _adminService.deleteCandidatura('${c['id']}');
-                          if (mounted) setState(() {});
-                        } catch (e) {
-                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mapErroAdmin(e))));
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-          },
-        );
-      },
-    );
   }
 
   // ─── POSTS TAB ──────────────────────────────────────

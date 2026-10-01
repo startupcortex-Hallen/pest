@@ -17,6 +17,7 @@ import '../../../providers/cupom_provider.dart';
 import '../../../services/checkout_service.dart';
 import '../../../services/endereco_service.dart';
 import '../../widgets/animated_card_entry.dart';
+import '../../widgets/app_states.dart';
 import '../pedidos/pagamento_screen.dart';
 
 class CartScreen extends StatefulWidget {
@@ -210,7 +211,7 @@ class _CartScreenState extends State<CartScreen> {
                     .map((e) => ListTile(
                           leading: Icon(
                             e.principal ? Icons.star_rounded : Icons.location_on_outlined,
-                            color: e.principal ? const Color(0xFFE50914) : null,
+                            color: e.principal ? AppColors.primary : null,
                           ),
                           title: Text(e.apelido.isNotEmpty ? e.apelido : 'Endereço'),
                           subtitle: Text(e.resumo, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -403,7 +404,7 @@ class _CartScreenState extends State<CartScreen> {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFF23D4F)),
+                      const Icon(Icons.error_outline_rounded, size: 16, color: AppColors.error),
                       const SizedBox(width: 8),
                       Expanded(child: Text(n, style: const TextStyle(fontSize: 13))),
                     ],
@@ -415,7 +416,7 @@ class _CartScreenState extends State<CartScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF23D4F), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
             child: const Text('Remover itens indisponíveis'),
           ),
         ],
@@ -477,9 +478,9 @@ class _CartScreenState extends State<CartScreen> {
             _linhaConfirm('Itens', '${cart.items.length} ${cart.items.length == 1 ? 'produto' : 'produtos'}'),
             _linhaConfirm('Subtotal', 'R\$ ${subtotal.toStringAsFixed(2)}'),
             if (cart.economia > 0)
-              _linhaConfirm('Desconto nos itens', '-R\$ ${cart.economia.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
+              _linhaConfirm('Desconto nos itens', '-R\$ ${cart.economia.toStringAsFixed(2)}', cor: AppColors.success),
             if (descontoCupom > 0)
-              _linhaConfirm('Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
+              _linhaConfirm('Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: AppColors.success),
             if (taxaEntrega > 0)
               _linhaConfirm('Taxa de entrega', 'R\$ ${taxaEntrega.toStringAsFixed(2)}'),
             const Divider(height: 24),
@@ -495,7 +496,7 @@ class _CartScreenState extends State<CartScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE50914), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
             child: const Text('Confirmar pedido'),
           ),
         ],
@@ -581,56 +582,24 @@ class _CartScreenState extends State<CartScreen> {
       body: Consumer<CartProvider>(
         builder: (context, cart, _) {
           if (cart.loading) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppSkeletonList(itemCount: 4, itemHeight: 110);
           }
           if (cart.error != null && cart.items.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.cloud_off_rounded, color: ThemeColors.hint(context), size: 64),
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                    child: Text(cart.error!,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('Verifique sua conexão e tente de novo',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: ThemeColors.secondaryText(context))),
-                  const SizedBox(height: AppSpacing.lg),
-                  ElevatedButton(
-                    onPressed: () => context.read<CartProvider>().loadCart(),
-                    child: const Text('Tentar novamente'),
-                  ),
-                ],
-              ),
+            return AppErrorState(
+              message: cart.error!,
+              onRetry: () => context.read<CartProvider>().loadCart(),
             );
           }
           if (cart.items.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.shopping_cart_outlined, color: ThemeColors.hint(context), size: 64),
-                  const SizedBox(height: 16),
-                  Text('Carrinho vazio',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('Adicione produtos para começar',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: ThemeColors.secondaryText(context))),
-                  const SizedBox(height: AppSpacing.lg),
-                  ElevatedButton(
-                    onPressed: () => context.go('/'),
-                    child: const Text('Continuar comprando'),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  TextButton(
-                    onPressed: () => context.go('/pedidos'),
-                    child: const Text('Ver meus pedidos'),
-                  ),
-                ],
+            return AppEmptyState(
+              icon: Icons.shopping_cart_outlined,
+              title: 'Carrinho vazio',
+              message: 'Adicione produtos para começar',
+              actionLabel: 'Continuar comprando',
+              onAction: () => context.go('/'),
+              extra: TextButton(
+                onPressed: () => context.go('/pedidos'),
+                child: const Text('Ver meus pedidos'),
               ),
             );
           }
@@ -647,7 +616,7 @@ class _CartScreenState extends State<CartScreen> {
                     onPressed: () => context.go('/'),
                     icon: const Icon(Icons.arrow_back_rounded, size: 18),
                     label: const Text('Continuar comprando'),
-                    style: TextButton.styleFrom(foregroundColor: const Color(0xFFE50914)),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.primary),
                   ),
                 ),
               ),
@@ -695,7 +664,7 @@ class _CartScreenState extends State<CartScreen> {
       decoration: BoxDecoration(
         color: ThemeColors.surface(context),
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: esgotado ? Border.all(color: const Color(0xFFF23D4F).withValues(alpha: 0.4)) : null,
+        border: esgotado ? Border.all(color: AppColors.error.withValues(alpha: 0.4)) : null,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -736,7 +705,7 @@ class _CartScreenState extends State<CartScreen> {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text('ESGOTADO',
-                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFFF23D4F), letterSpacing: 0.5)),
+                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.error, letterSpacing: 0.5)),
                       ),
                     ),
                 ],
@@ -785,11 +754,11 @@ class _CartScreenState extends State<CartScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00A650).withValues(alpha: 0.15),
+                          color: AppColors.success.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text('-$percentualOff%',
-                            style: const TextStyle(fontSize: 10, color: Color(0xFF00A650), fontWeight: FontWeight.w700)),
+                            style: const TextStyle(fontSize: 10, color: AppColors.success, fontWeight: FontWeight.w700)),
                       ),
                     ],
                   ),
@@ -798,7 +767,7 @@ class _CartScreenState extends State<CartScreen> {
                   'R\$ ${item.precoAtual.toStringAsFixed(2)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: emPromo ? const Color(0xFF00A650) : null,
+                        color: emPromo ? AppColors.success : null,
                       ),
                 ),
                 // Cupom percentual aplicado ao produto (evidência no item)
@@ -811,13 +780,13 @@ class _CartScreenState extends State<CartScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00A650).withValues(alpha: 0.15),
+                          color: AppColors.success.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           '-${cupom.cupomAplicado!.valor.toInt()}% cupom ${cupom.cupomAplicado!.codigo}',
                           style: const TextStyle(
-                              fontSize: 10, color: Color(0xFF00A650), fontWeight: FontWeight.w700),
+                              fontSize: 10, color: AppColors.success, fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],
@@ -826,7 +795,7 @@ class _CartScreenState extends State<CartScreen> {
                 const SizedBox(height: 2),
                 if (esgotado)
                   const Text('Sem estoque no momento',
-                      style: TextStyle(fontSize: 11, color: Color(0xFFF23D4F), fontWeight: FontWeight.w600))
+                      style: TextStyle(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w600))
                 else if (estoqueBaixo)
                   Text('Restam apenas $estoque ${estoque == 1 ? 'unidade' : 'unidades'}',
                       style: const TextStyle(fontSize: 11, color: Color(0xFFFFAD01), fontWeight: FontWeight.w600))
@@ -892,17 +861,17 @@ class _CartScreenState extends State<CartScreen> {
     final n = nome.toLowerCase();
     if (n.contains('preto')) return const Color(0xFF111111);
     if (n.contains('branco')) return const Color(0xFFF5F5F5);
-    if (n.contains('vermelho') || n.contains('vinho')) return const Color(0xFFE50914);
+    if (n.contains('vermelho') || n.contains('vinho')) return AppColors.primary;
     if (n.contains('dourado') || n.contains('gold')) return const Color(0xFFD4AF37);
     if (n.contains('azul')) return const Color(0xFF2D65F6);
-    if (n.contains('verde')) return const Color(0xFF00A650);
+    if (n.contains('verde')) return AppColors.success;
     if (n.contains('amarelo')) return const Color(0xFFFFC400);
     if (n.contains('rosa')) return const Color(0xFFFF80AB);
     if (n.contains('laranja')) return const Color(0xFFFF7A00);
     if (n.contains('roxo') || n.contains('violeta')) return const Color(0xFF9C27B0);
     if (n.contains('cinza') || n.contains('prata')) return const Color(0xFF9E9E9E);
     if (n.contains('marrom')) return const Color(0xFF795548);
-    return const Color(0xFFE50914);
+    return AppColors.primary;
   }
 
   Widget _buildQuantityButton({
@@ -1026,7 +995,7 @@ class _CartScreenState extends State<CartScreen> {
                   child: ElevatedButton(
                     onPressed: _buscandoCep ? null : _buscarCep,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE50914),
+                      backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1121,7 +1090,7 @@ class _CartScreenState extends State<CartScreen> {
                   child: ElevatedButton(
                     onPressed: _aplicandoCupom ? null : () => _aplicarCupom(cupom),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE50914),
+                      backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1138,22 +1107,22 @@ class _CartScreenState extends State<CartScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF00A650).withValues(alpha: 0.1),
+                color: AppColors.success.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.discount_rounded, size: 18, color: Color(0xFF00A650)),
+                  const Icon(Icons.discount_rounded, size: 18, color: AppColors.success),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       cupom.cupomAplicado!.descricao,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF00A650)),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.success),
                     ),
                   ),
                   GestureDetector(
                     onTap: cupom.removerCupom,
-                    child: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF00A650)),
+                    child: const Icon(Icons.close_rounded, size: 18, color: AppColors.success),
                   ),
                 ],
               ),
@@ -1164,17 +1133,17 @@ class _CartScreenState extends State<CartScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF23D4F).withValues(alpha: 0.1),
+                color: AppColors.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.error_outline_rounded, size: 18, color: Color(0xFFF23D4F)),
+                  Icon(Icons.error_outline_rounded, size: 18, color: AppColors.error),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Há itens esgotados no carrinho. Finalize a compra para revisá-los.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFFF23D4F), fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 12, color: AppColors.error, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -1184,16 +1153,16 @@ class _CartScreenState extends State<CartScreen> {
           ],
           _linhaResumo(context, 'Subtotal', 'R\$ ${subtotal.toStringAsFixed(2)}'),
           if (economiaItens > 0)
-            _linhaResumo(context, 'Desconto nos itens', '-R\$ ${economiaItens.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
+            _linhaResumo(context, 'Desconto nos itens', '-R\$ ${economiaItens.toStringAsFixed(2)}', cor: AppColors.success),
           if (descontoCupom > 0)
-            _linhaResumo(context, 'Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
+            _linhaResumo(context, 'Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: AppColors.success),
           _linhaResumo(context, 'Entrega',
               _tipoEntrega == 'retirada'
                   ? 'Grátis (retirada na unidade)'
                   : (taxaEntrega > 0 ? 'R\$ ${taxaEntrega.toStringAsFixed(2)}' : 'Grátis')),
           if (economiaTotal > 0)
             _linhaResumo(context, 'Você economizou', 'R\$ ${economiaTotal.toStringAsFixed(2)}',
-                cor: const Color(0xFF00A650), bold: true),
+                cor: AppColors.success, bold: true),
           const Divider(height: 20),
           _linhaResumo(context, 'Total', 'R\$ ${total.toStringAsFixed(2)}', bold: true, grande: true),
         ],
@@ -1226,20 +1195,20 @@ class _CartScreenState extends State<CartScreen> {
           color: ThemeColors.surfaceVariant(context),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: sel ? const Color(0xFFE50914) : Colors.transparent,
+            color: sel ? AppColors.primary : Colors.transparent,
             width: 1.5,
           ),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 20, color: sel ? const Color(0xFFE50914) : ThemeColors.hint(context)),
+            Icon(icon, size: 20, color: sel ? AppColors.primary : ThemeColors.hint(context)),
             const SizedBox(height: 4),
             Text(label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                  color: sel ? const Color(0xFFE50914) : ThemeColors.primaryText(context),
+                  color: sel ? AppColors.primary : ThemeColors.primaryText(context),
                 )),
             Text(subtitulo,
                 style: TextStyle(fontSize: 10, color: ThemeColors.secondaryText(context))),
@@ -1308,7 +1277,7 @@ class _CartScreenState extends State<CartScreen> {
               child: ElevatedButton(
                 onPressed: (_finalizando || cart.items.isEmpty) ? null : () => _finalizarCompra(cart, cupom),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE50914),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(horizontal: 20),

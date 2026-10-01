@@ -17,7 +17,8 @@ class ProductDetailScreen extends StatefulWidget {
 
   const ProductDetailScreen({super.key, required this.produtoId});
 
-  static void push(BuildContext context, int produtoId, {String? imageUrl}) {
+  static Future<void> push(BuildContext context, int produtoId,
+      {String? imageUrl}) async {
     // Pré-carrega a imagem do card antes da navegação para o voo de entrada
     // aterrissar sem spinner/piscar. A imagem já está no cache (veio do card),
     // então o custo é praticamente zero.
@@ -25,10 +26,10 @@ class ProductDetailScreen extends StatefulWidget {
     if (url != null && url.isNotEmpty) {
       precacheImage(CachedNetworkImageProvider(url), context);
     }
-    Navigator.of(context).push<dynamic>(
+    await Navigator.of(context).push<dynamic>(
       PageRouteBuilder<dynamic>(
-        pageBuilder: (_, __, ___) => ProductDetailScreen(produtoId: produtoId),
-        transitionsBuilder: (_, Animation<double> animation, __, Widget child) {
+        pageBuilder: (_, _, _) => ProductDetailScreen(produtoId: produtoId),
+        transitionsBuilder: (_, Animation<double> animation, _, Widget child) {
           return FadeTransition(opacity: animation, child: child);
         },
         transitionDuration: const Duration(milliseconds: 900),

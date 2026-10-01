@@ -23,6 +23,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.5
+          cache: true
+
+      - name: Analyze (falha apenas em erros)
+        working-directory: o_pest_shop
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Testes
+        working-directory: o_pest_shop
+        run: flutter test
 
       - name: Build web
         working-directory: o_pest_shop
