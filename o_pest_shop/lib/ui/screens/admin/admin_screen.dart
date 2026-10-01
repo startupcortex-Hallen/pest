@@ -19,7 +19,14 @@ import 'produto_form_screen.dart';
 import 'unidade_form_screen.dart';
 import 'admin_utils.dart';
 import 'tabs/assinaturas_tab.dart';
+import 'tabs/aulas_tab.dart';
+import 'tabs/consultas_tab.dart';
+import 'tabs/desafios_tab.dart';
+import 'tabs/nutricao_tab.dart';
+import 'tabs/nutricionistas_tab.dart';
 import 'tabs/pedidos_tab.dart';
+import 'tabs/profissionais_tab.dart';
+import 'tabs/treinos_tab.dart';
 import 'tabs/usuarios_tab.dart';
 import '../../widgets/animated_card_entry.dart';
 
@@ -54,7 +61,7 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 11, vsync: this);
+    _tabCtrl = TabController(length: 18, vsync: this);
     _tabCtrl.addListener(() {
       if (!_tabCtrl.indexIsChanging) _loadTabData(_tabCtrl.index);
     });
@@ -393,6 +400,20 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
                       _buildTabItem('Pedidos', Icons.receipt_long_rounded, 9),
                       const SizedBox(width: AppSpacing.lg),
                       _buildTabItem('Assinaturas', Icons.card_membership_rounded, 10),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Aulas', Icons.sports_gymnastics_rounded, 11),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Treinos', Icons.fitness_center_rounded, 12),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Desafios', Icons.emoji_events_rounded, 13),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Nutrição', Icons.restaurant_menu_rounded, 14),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Nutricionistas', Icons.medical_services_rounded, 15),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Profissionais', Icons.badge_rounded, 16),
+                      const SizedBox(width: AppSpacing.lg),
+                      _buildTabItem('Consultas', Icons.calendar_month_rounded, 17),
                     ],
                   ),
                 ),
@@ -466,6 +487,13 @@ class _AdminScreenState extends State<AdminScreen> with SingleTickerProviderStat
     if (_tabCtrl.index == 8) return _buildVerificacaoLixoTab();
     if (_tabCtrl.index == 9) return const PedidosTab();
     if (_tabCtrl.index == 10) return const AssinaturasTab();
+    if (_tabCtrl.index == 11) return const AulasTab();
+    if (_tabCtrl.index == 12) return const TreinosTab();
+    if (_tabCtrl.index == 13) return const DesafiosTab();
+    if (_tabCtrl.index == 14) return const NutricaoTab();
+    if (_tabCtrl.index == 15) return const NutricionistasTab();
+    if (_tabCtrl.index == 16) return const ProfissionaisTab();
+    if (_tabCtrl.index == 17) return const ConsultasTab();
     return const SizedBox.shrink();
   }
 

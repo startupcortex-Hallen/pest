@@ -7,3 +7,10 @@ class AuthRefreshNotifier extends ChangeNotifier {
 
   void trigger() => notifyListeners();
 }
+
+/// Marcador global: o app foi aberto por um link de recuperação de senha.
+/// O roteador usa isso para levar o usuário à tela de "Nova senha".
+class PasswordRecoveryFlag {
+  PasswordRecoveryFlag._();
+  static bool pending = false;
+}

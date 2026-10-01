@@ -6,11 +6,13 @@ import '../providers/auth_provider.dart';
 import '../ui/screens/splash/splash_screen.dart';
 import '../ui/screens/auth/login_screen.dart';
 import '../ui/screens/auth/register_screen.dart';
+import '../ui/screens/auth/redefinir_senha_screen.dart';
 import '../ui/screens/product/product_detail_screen.dart';
 import '../ui/screens/search/search_results_screen.dart';
 import '../ui/screens/cupons/cupons_screen.dart';
 import '../ui/screens/cartoes/cartoes_screen.dart';
 import '../ui/screens/profile/edit_personal_data_screen.dart';
+import '../ui/screens/profile/enderecos_screen.dart';
 import '../ui/screens/feed/feed_screen.dart';
 import '../ui/screens/feed/post_detail_screen.dart';
 import '../ui/screens/feed/aviso_detail_screen.dart';
@@ -29,6 +31,7 @@ import '../ui/screens/cart/cart_screen.dart';
 import '../ui/screens/pedidos/pedidos_screen.dart';
 import '../ui/screens/admin/admin_screen.dart';
 import '../ui/screens/entregador/area_entregador_screen.dart';
+import '../ui/screens/profissional/area_profissional_screen.dart';
 import '../ui/screens/pedidos/pedidos_loja_screen.dart';
 import '../ui/navigation/main_shell.dart';
 
@@ -44,6 +47,11 @@ class AppRouter {
       final location = state.uri.toString();
 
       if (location == '/splash') return null;
+
+      // Abriu o app pelo link de recuperação: manda direto para "Nova senha".
+      if (PasswordRecoveryFlag.pending && isLoggedIn && location == '/') {
+        return '/redefinir-senha';
+      }
 
       if (isLoggedIn && (location == '/login' || location == '/register')) {
         return '/';
@@ -65,6 +73,10 @@ class AppRouter {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/redefinir-senha',
+        builder: (context, state) => const RedefinirSenhaScreen(),
       ),
       GoRoute(
         path: '/',
@@ -115,6 +127,10 @@ class AppRouter {
       GoRoute(
         path: '/editar-dados',
         builder: (context, state) => const EditPersonalDataScreen(),
+      ),
+      GoRoute(
+        path: '/enderecos',
+        builder: (context, state) => const EnderecosScreen(),
       ),
       GoRoute(
         path: '/post/:id',
@@ -191,6 +207,17 @@ class AppRouter {
             return const MainShell();
           }
           return const PedidosLojaScreen();
+        },
+      ),
+      GoRoute(
+        path: '/area-profissional',
+        builder: (context, state) {
+          final auth = context.read<AuthProvider>();
+          final funcao = auth.user?.funcao;
+          if (funcao != 'admin' && funcao != 'nutricionista' && funcao != 'personal') {
+            return const MainShell();
+          }
+          return const AreaProfissionalScreen();
         },
       ),
       GoRoute(

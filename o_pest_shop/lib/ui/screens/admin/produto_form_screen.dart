@@ -48,6 +48,7 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
   int? _categoriaId;
   int? _marcaId;
   bool _emPromocao = false;
+  bool _freteGratis = false;
   bool _saving = false;
   int? _unidadeIdEditando;
 
@@ -100,6 +101,7 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
       _categoriaId = p['categoria_id'] as int?;
       _marcaId = p['marca_id'] as int?;
       _emPromocao = p['em_promocao'] == true;
+      _freteGratis = p['frete_gratis'] == true;
       _estoque = p['estoque'] as int? ?? 1;
       _unidadeIdEditando = p['unidade_id'] as int?;
     }
@@ -220,6 +222,7 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
       'categoria_id': _categoriaId,
       'marca_id': _marcaId,
       'em_promocao': _emPromocao,
+      'frete_gratis': _freteGratis,
     };
     if (_emPromocao) {
       final promoText = _precoPromocionalCtrl.text.replaceAll(',', '.').trim();
@@ -835,9 +838,10 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
         _buildToggleRow(
           icon: Icons.local_shipping_rounded,
           iconColor: AppColors.primary,
-          title: 'O Pest Envios',
-          subtitle: 'Envio rápido para região',
-          value: true,
+          title: 'Frete grátis',
+          subtitle: 'Este produto não paga taxa de entrega',
+          value: _freteGratis,
+          onChanged: (v) => setState(() => _freteGratis = v),
         ),
         const SizedBox(height: AppSpacing.sm),
         _buildPromocaoToggle(),
@@ -873,16 +877,27 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
               ],
             ),
           ),
-          Container(
-            width: 44,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(12),
+          if (onChanged != null)
+            Switch.adaptive(
+              value: value,
+              onChanged: onChanged,
+              activeColor: AppColors.primary,
+            )
+          else
+            Container(
+              width: 44,
+              height: 24,
+              decoration: BoxDecoration(
+                color: value ? AppColors.primary : AppColors.divider,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                value ? Icons.check_rounded : Icons.close_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
             ),
-            alignment: Alignment.center,
-            child: const Icon(Icons.check_rounded, color: Colors.white, size: 18),
-          ),
         ],
       ),
     );

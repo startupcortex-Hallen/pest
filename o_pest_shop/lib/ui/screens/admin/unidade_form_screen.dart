@@ -27,6 +27,8 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
   final _horarioDomCtrl = TextEditingController();
   final _ordemCtrl = TextEditingController();
   final _distanciaCtrl = TextEditingController();
+  final _taxaCtrl = TextEditingController();
+  final _freteGratisAcimaCtrl = TextEditingController();
 
   bool _ativa = true;
   bool _saving = false;
@@ -35,7 +37,7 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
   bool _loadingUsuarios = false;
   final _searchCtrl = TextEditingController();
 
-  static const _roles = ['Admin', 'Gestor', 'Atendente', 'Personal', 'Nutricionista'];
+  static const _roles = ['Admin', 'Gestor', 'Atendente', 'Entregador', 'Personal', 'Nutricionista'];
 
   bool get _isEditing => widget.unidade != null;
   int? get _id => widget.unidade?['id'] as int?;
@@ -59,6 +61,14 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
       _horarioDomCtrl.text = u['horario_dom'] ?? '';
       _ordemCtrl.text = (u['ordem'] as int?)?.toString() ?? '';
       _distanciaCtrl.text = u['distancia'] ?? '';
+      final taxa = u['taxa_entrega'];
+      _taxaCtrl.text = taxa == null
+          ? ''
+          : (taxa is num && taxa == taxa.roundToDouble() ? taxa.toInt().toString() : taxa.toString());
+      final acima = u['frete_gratis_acima'];
+      _freteGratisAcimaCtrl.text = acima == null
+          ? ''
+          : (acima is num && acima == acima.roundToDouble() ? acima.toInt().toString() : acima.toString());
       _ativa = u['ativa'] == true;
     }
     _carregarUsuarios();
@@ -79,6 +89,8 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
     _horarioDomCtrl.dispose();
     _ordemCtrl.dispose();
     _distanciaCtrl.dispose();
+    _taxaCtrl.dispose();
+    _freteGratisAcimaCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -215,6 +227,8 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
       'ordem': int.tryParse(_ordemCtrl.text.trim()) ?? 0,
       'ativa': _ativa,
       'distancia': _distanciaCtrl.text.trim(),
+      'taxa_entrega': double.tryParse(_taxaCtrl.text.replaceAll(',', '.').trim()) ?? 0,
+      'frete_gratis_acima': double.tryParse(_freteGratisAcimaCtrl.text.replaceAll(',', '.').trim()),
     };
     if (_fotoUrl != null) data['foto_url'] = _fotoUrl;
 
@@ -343,6 +357,26 @@ class _UnidadeFormScreenState extends State<UnidadeFormScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextFormField(controller: _distanciaCtrl, decoration: _inputDec('Distância', 'Ex: 2.5 km')),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _taxaCtrl,
+                      decoration: _inputDec('Taxa de entrega (R\$)', 'Ex: 0'),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _freteGratisAcimaCtrl,
+                      decoration: _inputDec('Frete grátis acima de (R\$)', 'Ex: 100 (opcional)'),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
                   ),
                 ],
               ),

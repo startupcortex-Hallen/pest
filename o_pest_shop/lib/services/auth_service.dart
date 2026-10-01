@@ -87,8 +87,29 @@ class AuthService {
     await _client.auth.signOut();
   }
 
+  /// Envia o e-mail de recuperação de senha.
+  /// No web o link volta para o próprio app com "?recuperar=1" no fim,
+  /// para sabermos que devemos abrir a tela de nova senha.
   Future<void> resetPassword(String email) async {
-    await _client.auth.resetPasswordForEmail(email);
+    await _client.auth.resetPasswordForEmail(email, redirectTo: _webRecoveryRedirect);
+  }
+
+  /// Define uma nova senha para o usuário logado (link de recuperação
+  /// ou troca de senha dentro do app).
+  Future<void> updatePassword(String novaSenha) async {
+    await _client.auth.updateUser(UserAttributes(password: novaSenha));
+  }
+
+  String? get _webRecoveryRedirect {
+    if (!kIsWeb) return null;
+    final b = Uri.base;
+    final base = Uri(
+      scheme: b.scheme,
+      host: b.host,
+      port: b.hasPort ? b.port : null,
+      path: b.path,
+    );
+    return '$base?recuperar=1';
   }
 
   Future<UserProfile?> getProfile(String userId) async {

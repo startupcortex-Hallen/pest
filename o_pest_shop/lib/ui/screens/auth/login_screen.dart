@@ -36,6 +36,56 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Future<void> _handleForgotPassword() async {
+    final emailCtrl = TextEditingController(text: _emailController.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recuperar senha'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Informe seu e-mail e enviaremos um link para você criar uma nova senha.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: emailCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Seu e-mail',
+                hintText: 'seu@email.com',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, emailCtrl.text.trim()),
+            child: const Text('Enviar link'),
+          ),
+        ],
+      ),
+    );
+    emailCtrl.dispose();
+    if (email == null || email.isEmpty || !mounted) return;
+
+    final erro = await context.read<AuthProvider>().sendPasswordReset(email);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(erro ?? 'Link enviado para $email. Confira sua caixa de entrada.'),
+        backgroundColor: erro == null ? null : AppColors.error,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -201,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () {},
+                      onPressed: _handleForgotPassword,
                       child: const Text('Esqueceu a senha?'),
                     ),
                   ],
@@ -231,51 +281,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: const Text('Criar conta'),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.lg),
-                _buildDividerWithText('ou entre com'),
                 const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.g_mobiledata_rounded, size: 24),
-                        label: const Text('Google'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.apple, size: 24),
-                        label: const Text('Apple'),
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
           );
         },
       ),
-    );
-  }
-
-  Widget _buildDividerWithText(String text) {
-    return Row(
-      children: [
-        const Expanded(child: Divider()),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: Text(
-            text,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: ThemeColors.secondaryText(context),
-                ),
-          ),
-        ),
-        const Expanded(child: Divider()),
-      ],
     );
   }
 

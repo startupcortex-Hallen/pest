@@ -82,6 +82,81 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
     }
   }
 
+  Future<void> _abrirTrocarSenha() async {
+    final senhaCtrl = TextEditingController();
+    final confirmaCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Alterar senha'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: senhaCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Nova senha',
+                  hintText: 'Mínimo 6 caracteres',
+                ),
+                validator: (v) {
+                  if (v == null || v.length < 6) {
+                    return 'A senha deve ter no mínimo 6 caracteres';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: confirmaCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Confirmar nova senha'),
+                validator: (v) {
+                  if (v != senhaCtrl.text) return 'As senhas não conferem';
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) {
+      senhaCtrl.dispose();
+      confirmaCtrl.dispose();
+      return;
+    }
+
+    final erro = await context.read<AuthProvider>().changePassword(senhaCtrl.text);
+    senhaCtrl.dispose();
+    confirmaCtrl.dispose();
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(erro ?? 'Senha alterada com sucesso!'),
+        backgroundColor: erro == null ? AppColors.success : AppColors.error,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
@@ -142,6 +217,20 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                'Segurança',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton.icon(
+                onPressed: _abrirTrocarSenha,
+                icon: const Icon(Icons.lock_reset_rounded),
+                label: const Text('Alterar senha'),
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(

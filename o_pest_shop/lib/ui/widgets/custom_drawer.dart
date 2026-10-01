@@ -64,6 +64,15 @@ class CustomDrawer extends StatelessWidget {
                       },
                     ),
                     _DrawerItem(
+                      icon: Icons.location_on_rounded,
+                      label: 'Meus Endereços',
+                      visible: true,
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/enderecos');
+                      },
+                    ),
+                    _DrawerItem(
                       icon: Icons.delivery_dining_rounded,
                       label: 'Área do Entregador',
                       visible: funcao == 'admin' || funcao == 'entregador',
@@ -84,7 +93,7 @@ class CustomDrawer extends StatelessWidget {
                     _DrawerItem(
                       icon: Icons.medical_services_rounded,
                       label: 'Área do Nutricionista',
-                      visible: false,
+                      visible: funcao == 'nutricionista' || funcao == 'admin',
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/area-profissional');
@@ -93,7 +102,7 @@ class CustomDrawer extends StatelessWidget {
                     _DrawerItem(
                       icon: Icons.fitness_center_rounded,
                       label: 'Área do Personal',
-                      visible: false,
+                      visible: funcao == 'personal' || funcao == 'admin',
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/area-profissional');

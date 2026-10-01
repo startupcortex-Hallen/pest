@@ -5,14 +5,17 @@ import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/helpers/theme_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../models/cart_item.dart';
+import '../../../models/endereco.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../providers/cupom_provider.dart';
 import '../../../services/checkout_service.dart';
+import '../../../services/endereco_service.dart';
 import '../../widgets/animated_card_entry.dart';
 import '../pedidos/pagamento_screen.dart';
 
@@ -41,12 +44,20 @@ class _CartScreenState extends State<CartScreen> {
   bool _buscandoCep = false;
   String _tipoEntrega = 'retirada';
 
+  final _enderecoService = EnderecoService();
+  List<Endereco> _enderecos = [];
+  Map<int, double> _taxaUnidades = {};
+  Map<int, double?> _freteGratisAcima = {};
+  final Set<int> _taxasCarregadas = {};
+  bool _carregandoTaxas = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<CartProvider>().loadCart();
       context.read<CupomProvider>().loadCupons();
+      _carregarEnderecos();
     });
   }
 
@@ -103,6 +114,213 @@ class _CartScreenState extends State<CartScreen> {
     if (mounted) setState(() => _buscandoCep = false);
   }
 
+  Future<void> _carregarEnderecos() async {
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null) return;
+    try {
+      final lista = await _enderecoService.fetch(userId);
+      if (mounted) setState(() => _enderecos = lista);
+    } catch (e) {
+      debugPrint('Erro endereços: $e');
+    }
+  }
+
+  Future<void> _carregarTaxas(Set<int> unidadeIds) async {
+    if (unidadeIds.isEmpty) return;
+    _carregandoTaxas = true;
+    try {
+      final res = await Supabase.instance.client
+          .from('unidades')
+          .select('id, taxa_entrega, frete_gratis_acima')
+          .inFilter('id', unidadeIds.toList());
+      final taxas = <int, double>{};
+      final acima = <int, double?>{};
+      for (final row in (res as List).cast<Map<String, dynamic>>()) {
+        final id = row['id'] as int;
+        taxas[id] = (row['taxa_entrega'] as num?)?.toDouble() ?? 0;
+        acima[id] = (row['frete_gratis_acima'] as num?)?.toDouble();
+      }
+      if (mounted) {
+        setState(() {
+          _taxaUnidades = taxas;
+          _freteGratisAcima = acima;
+          _taxasCarregadas.addAll(unidadeIds);
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro taxas de entrega: $e');
+    }
+    _carregandoTaxas = false;
+  }
+
+  /// Taxa de entrega estimada do carrinho (por unidade, considerando
+  /// frete grátis do produto e a regra de valor mínimo da loja).
+  double _calcularTaxa(CartProvider cart) {
+    if (_tipoEntrega != 'entrega') return 0;
+    final porUnidade = <int, List<CartItem>>{};
+    for (final i in cart.items) {
+      porUnidade.putIfAbsent(i.produtoUnidadeId ?? 1, () => []).add(i);
+    }
+    var taxa = 0.0;
+    porUnidade.forEach((unidadeId, itens) {
+      if (itens.every((i) => i.produtoFreteGratis)) return;
+      final subtotalUnidade = itens.fold<double>(0, (s, i) => s + i.total);
+      final acima = _freteGratisAcima[unidadeId];
+      if (acima != null && subtotalUnidade >= acima) return;
+      taxa += _taxaUnidades[unidadeId] ?? 0;
+    });
+    return taxa;
+  }
+
+  void _garantirTaxas(CartProvider cart) {
+    if (_tipoEntrega != 'entrega' || cart.items.isEmpty) return;
+    final ids = cart.items.map((i) => i.produtoUnidadeId ?? 1).toSet();
+    if (_carregandoTaxas || _taxasCarregadas.containsAll(ids)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregarTaxas(ids));
+  }
+
+  Future<void> _abrirEnderecos() async {
+    if (_enderecos.isEmpty) await _carregarEnderecos();
+    if (!mounted) return;
+    if (_enderecos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhum endereço salvo ainda. Preencha abaixo e toque em "Salvar endereço".'),
+        ),
+      );
+      return;
+    }
+
+    final escolhido = await showModalBottomSheet<Endereco>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Endereços salvos',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: _enderecos
+                    .map((e) => ListTile(
+                          leading: Icon(
+                            e.principal ? Icons.star_rounded : Icons.location_on_outlined,
+                            color: e.principal ? const Color(0xFFE50914) : null,
+                          ),
+                          title: Text(e.apelido.isNotEmpty ? e.apelido : 'Endereço'),
+                          subtitle: Text(e.resumo, maxLines: 2, overflow: TextOverflow.ellipsis),
+                          onTap: () => Navigator.pop(ctx, e),
+                        ))
+                    .toList(),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                context.push('/enderecos');
+              },
+              icon: const Icon(Icons.settings_rounded, size: 18),
+              label: const Text('Gerenciar endereços'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (escolhido == null || !mounted) return;
+    setState(() {
+      _cepCtrl.text = escolhido.cep;
+      _ruaCtrl.text = escolhido.rua;
+      _numeroCtrl.text = escolhido.numero;
+      _complementoCtrl.text = escolhido.complemento;
+      _bairroCtrl.text = escolhido.bairro;
+      _cidadeCtrl.text = escolhido.cidade;
+      _ufCtrl.text = escolhido.uf;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Endereço aplicado ao pedido!'), backgroundColor: AppColors.success),
+    );
+  }
+
+  Future<void> _salvarEnderecoAtual() async {
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null) return;
+    final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length != 8 ||
+        _ruaCtrl.text.trim().isEmpty ||
+        _numeroCtrl.text.trim().isEmpty ||
+        _bairroCtrl.text.trim().isEmpty ||
+        _cidadeCtrl.text.trim().isEmpty ||
+        _ufCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preencha o endereço completo (com CEP) antes de salvar.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final apelidoCtrl = TextEditingController(text: 'Casa');
+    final apelido = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Salvar endereço'),
+        content: TextField(
+          controller: apelidoCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Apelido (ex: Casa, Trabalho)'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, apelidoCtrl.text.trim()),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    if (apelido == null) {
+      apelidoCtrl.dispose();
+      return;
+    }
+    final nome = apelido.isEmpty ? 'Casa' : apelido;
+    apelidoCtrl.dispose();
+    if (!mounted) return;
+
+    try {
+      await _enderecoService.adicionar(
+        userId,
+        apelido: nome,
+        cep: cep,
+        rua: _ruaCtrl.text.trim(),
+        numero: _numeroCtrl.text.trim(),
+        complemento: _complementoCtrl.text.trim(),
+        bairro: _bairroCtrl.text.trim(),
+        cidade: _cidadeCtrl.text.trim(),
+        uf: _ufCtrl.text.trim().toUpperCase(),
+        principal: _enderecos.isEmpty,
+      );
+      await _carregarEnderecos();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Endereço salvo!'), backgroundColor: AppColors.success),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao salvar endereço: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
   /// Monta o endereço completo no MESMO padrão usado pelo mapa das unidades.
   String get _enderecoFormatado {
     final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
@@ -117,7 +335,7 @@ class _CartScreenState extends State<CartScreen> {
       if (complemento.isNotEmpty) complemento,
       if (bairro.isNotEmpty) bairro,
       if (cidade.isNotEmpty || uf.isNotEmpty)
-        '${cidade}${uf.isNotEmpty ? ' - $uf' : ''}',
+        '$cidade${uf.isNotEmpty ? ' - $uf' : ''}',
     ];
     final endereco = partes.join(', ');
     final comCep = cep.length == 8 ? '$endereco, CEP $cep' : endereco;
@@ -218,6 +436,9 @@ class _CartScreenState extends State<CartScreen> {
     if (cart.items.isEmpty || _finalizando) return;
 
     if (!await _validarEstoque(cart)) return;
+    if (!mounted) return;
+
+    final taxaEntrega = _calcularTaxa(cart);
 
     final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (_tipoEntrega == 'entrega') {
@@ -244,7 +465,7 @@ class _CartScreenState extends State<CartScreen> {
     final descontoCupom = cupom.cupomAplicado != null
         ? subtotal - cupom.calcularDesconto(subtotal)
         : 0.0;
-    final total = subtotal - descontoCupom;
+    final total = subtotal - descontoCupom + taxaEntrega;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -259,6 +480,8 @@ class _CartScreenState extends State<CartScreen> {
               _linhaConfirm('Desconto nos itens', '-R\$ ${cart.economia.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
             if (descontoCupom > 0)
               _linhaConfirm('Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
+            if (taxaEntrega > 0)
+              _linhaConfirm('Taxa de entrega', 'R\$ ${taxaEntrega.toStringAsFixed(2)}'),
             const Divider(height: 24),
             _linhaConfirm('Total', 'R\$ ${total.toStringAsFixed(2)}', bold: true),
             const SizedBox(height: 8),
@@ -708,8 +931,9 @@ class _CartScreenState extends State<CartScreen> {
     final descontoCupom = cupom.cupomAplicado != null
         ? subtotal - cupom.calcularDesconto(subtotal)
         : 0.0;
-    final freteGratis = cart.items.every((i) => i.produtoFreteGratis);
-    final total = subtotal - descontoCupom;
+    final taxaEntrega = _calcularTaxa(cart);
+    final total = subtotal - descontoCupom + taxaEntrega;
+    _garantirTaxas(cart);
     final economiaTotal = economiaItens + descontoCupom;
     final temEsgotado = cart.itensEsgotados.isNotEmpty;
 
@@ -747,6 +971,34 @@ class _CartScreenState extends State<CartScreen> {
             ],
           ),
           if (_tipoEntrega == 'entrega') ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _abrirEnderecos,
+                    icon: const Icon(Icons.bookmark_outline_rounded, size: 16),
+                    label: const Text('Endereço salvo', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _salvarEnderecoAtual,
+                    icon: const Icon(Icons.save_outlined, size: 16),
+                    label: const Text('Salvar endereço', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             // CEP com busca automática
             Row(
@@ -935,7 +1187,10 @@ class _CartScreenState extends State<CartScreen> {
             _linhaResumo(context, 'Desconto nos itens', '-R\$ ${economiaItens.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
           if (descontoCupom > 0)
             _linhaResumo(context, 'Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
-          _linhaResumo(context, 'Entrega', freteGratis ? 'Grátis' : 'Retirada na unidade'),
+          _linhaResumo(context, 'Entrega',
+              _tipoEntrega == 'retirada'
+                  ? 'Grátis (retirada na unidade)'
+                  : (taxaEntrega > 0 ? 'R\$ ${taxaEntrega.toStringAsFixed(2)}' : 'Grátis')),
           if (economiaTotal > 0)
             _linhaResumo(context, 'Você economizou', 'R\$ ${economiaTotal.toStringAsFixed(2)}',
                 cor: const Color(0xFF00A650), bold: true),
@@ -1022,7 +1277,7 @@ class _CartScreenState extends State<CartScreen> {
     final descontoCupom = cupom.cupomAplicado != null
         ? subtotal - cupom.calcularDesconto(subtotal)
         : 0.0;
-    final total = subtotal - descontoCupom;
+    final total = subtotal - descontoCupom + _calcularTaxa(cart);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),

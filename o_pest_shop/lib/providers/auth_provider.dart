@@ -152,6 +152,29 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Dispara o e-mail de recuperação. Retorna null em caso de sucesso
+  /// ou uma mensagem amigável de erro.
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _authService.resetPassword(email.trim());
+      return null;
+    } catch (e) {
+      debugPrint('████ Erro resetPassword: $e');
+      return 'Não foi possível enviar o e-mail. Confira o endereço e tente de novo.';
+    }
+  }
+
+  /// Troca a senha do usuário logado (recuperação ou dentro do app).
+  Future<String?> changePassword(String novaSenha) async {
+    try {
+      await _authService.updatePassword(novaSenha);
+      return null;
+    } catch (e) {
+      debugPrint('████ Erro changePassword: $e');
+      return 'Não foi possível alterar a senha. Tente novamente.';
+    }
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();
