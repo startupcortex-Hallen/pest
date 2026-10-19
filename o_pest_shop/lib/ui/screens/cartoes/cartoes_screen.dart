@@ -5,6 +5,10 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../models/cartao_credito.dart';
 import '../../../providers/cartao_provider.dart';
 
+/// Cartões salvos com segurança no gateway (PagBank).
+///
+/// O cartão é salvo automaticamente ao pagar com crédito marcando
+/// "Salvar cartão" — nunca guardamos número/CVV no nosso banco.
 class CartoesScreen extends StatefulWidget {
   const CartoesScreen({super.key});
 
@@ -21,111 +25,6 @@ class _CartoesScreenState extends State<CartoesScreen> {
     });
   }
 
-  void _showAdicionarDialog() {
-    final apelidoCtrl = TextEditingController();
-    final numeroCtrl = TextEditingController();
-    final titularCtrl = TextEditingController();
-    final mesCtrl = TextEditingController();
-    final anoCtl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Adicionar Cartão'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: apelidoCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Apelido', hintText: 'Meu cartão'),
-              ),
-              TextField(
-                controller: titularCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Titular', hintText: 'Nome no cartão'),
-              ),
-              TextField(
-                controller: numeroCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Número',
-                    hintText: '****.****.****.1234'),
-                maxLength: 19,
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: mesCtrl,
-                      decoration:
-                          const InputDecoration(labelText: 'Mês', hintText: '12'),
-                      keyboardType: TextInputType.number,
-                      maxLength: 2,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: TextField(
-                      controller: anoCtl,
-                      decoration:
-                          const InputDecoration(labelText: 'Ano', hintText: '2028'),
-                      keyboardType: TextInputType.number,
-                      maxLength: 4,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final provider = context.read<CartaoProvider>();
-              // Nunca gravar o número completo (PCI-DSS): salva apenas os 4 últimos.
-              final digitos = numeroCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
-              final finais = digitos.length >= 4 ? digitos.substring(digitos.length - 4) : digitos;
-              final cartao = CartaoCredito(
-                id: 0,
-                userId: provider.userId ?? '',
-                apelido: apelidoCtrl.text,
-                numeroMascarado: finais.isEmpty ? '' : '**** **** **** $finais',
-                bandeira: _detectBandeira(numeroCtrl.text),
-                titular: titularCtrl.text,
-                mesValidade: int.tryParse(mesCtrl.text) ?? 1,
-                anoValidade: int.tryParse(anoCtl.text) ?? 2030,
-              );
-              final erro = await provider.adicionarCartao(cartao);
-              if (ctx.mounted) Navigator.pop(ctx);
-              if (erro != null && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(erro)),
-                );
-              }
-            },
-            child: const Text('Salvar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _detectBandeira(String numero) {
-    final n = numero.replaceAll(RegExp(r'\D'), '');
-    if (n.startsWith('4')) return 'Visa';
-    if (n.startsWith('5')) return 'Master';
-    if (RegExp(r'^3[47]').hasMatch(n)) return 'Amex';
-    if (RegExp(r'^(636368|438935|504175|451416|636297)').hasMatch(n)) {
-      return 'Elo';
-    }
-    return 'Outra';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -139,11 +38,6 @@ class _CartoesScreenState extends State<CartoesScreen> {
                 ?.copyWith(fontWeight: FontWeight.bold)),
         elevation: 0,
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAdicionarDialog,
-        backgroundColor: AppColors.primary,
-        child: const Icon(Icons.add_rounded, color: AppColors.onPrimary),
-      ),
       body: Consumer<CartaoProvider>(
         builder: (context, cartaoProv, _) {
           if (cartaoProv.loading) {
@@ -151,28 +45,34 @@ class _CartoesScreenState extends State<CartoesScreen> {
           }
           if (cartaoProv.cartoes.isEmpty) {
             return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.credit_card_outlined,
-                      color: AppColors.hint, size: 64),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Nenhum cartão salvo',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Adicione um cartão para agilizar suas compras',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppColors.secondaryText),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.credit_card_outlined,
+                        color: AppColors.hint, size: 64),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Nenhum cartão salvo',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ao pagar com cartão de crédito, marque "Salvar cartão" — '
+                      'os dados são guardados com segurança no gateway, nunca no nosso banco.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.secondaryText),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -191,6 +91,11 @@ class _CartoesScreenState extends State<CartoesScreen> {
 
   Widget _buildCartaoCard(
       BuildContext context, CartaoProvider prov, CartaoCredito cartao) {
+    final utilizavel = cartao.gatewayCardId != null;
+    final digitos = cartao.numeroMascarado.replaceAll(RegExp(r'[^0-9]'), '');
+    final final4 = digitos.length >= 4
+        ? digitos.substring(digitos.length - 4)
+        : digitos.padLeft(4, '0');
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -211,14 +116,31 @@ class _CartoesScreenState extends State<CartoesScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                cartao.apelido,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppColors.onPrimary, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  cartao.apelido,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(color: AppColors.onPrimary, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              if (cartao.padrao)
+              if (!utilizavel)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.onPrimary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Text('Reativar no pagamento',
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: AppColors.onPrimary)),
+                )
+              else if (cartao.padrao)
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
@@ -236,7 +158,7 @@ class _CartoesScreenState extends State<CartoesScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
-            cartao.numeroMascarado,
+            utilizavel ? cartao.numeroMascarado : '•••• •••• •••• $final4',
             style: Theme.of(context)
                 .textTheme
                 .titleLarge
@@ -246,12 +168,16 @@ class _CartoesScreenState extends State<CartoesScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                cartao.titular,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: AppColors.onPrimary.withValues(alpha: 0.8)),
+              Expanded(
+                child: Text(
+                  cartao.titular,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.onPrimary.withValues(alpha: 0.8)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               Row(
                 children: [

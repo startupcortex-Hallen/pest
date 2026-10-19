@@ -4,6 +4,12 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Precisamos acessar suas fotos para enviar imagens de produtos, avatar e progresso.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Precisamos da câmera para tirar fotos de produtos e progresso.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Precisamos salvar imagens que você escolher no app.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

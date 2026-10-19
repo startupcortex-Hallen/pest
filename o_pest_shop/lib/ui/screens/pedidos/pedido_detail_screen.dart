@@ -11,6 +11,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../services/checkout_service.dart';
+import '../../widgets/comprovante_pagamento.dart';
 import 'pagamento_screen.dart';
 
 /// Detalhe do pedido para o cliente — padrão Mercado Livre/Shopee:
@@ -87,7 +88,7 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     try {
       final atualizado = await Supabase.instance.client
           .from('pedidos')
-          .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)')
+          .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)')
           .eq('id', _pedido['id'])
           .eq('user_id', userId)
           .maybeSingle();
@@ -130,6 +131,30 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
 
   String get _tipoEntrega => _pedido['tipo_entrega'] as String? ?? 'retirada';
 
+  Map<String, dynamic>? get _pagamentoGravado =>
+      _pedido['pagamentos'] is Map ? (_pedido['pagamentos'] as Map).cast<String, dynamic>() : null;
+
+  String get _rotuloPagamento {
+    final p = _pagamentoGravado;
+    if (p != null) {
+      switch (p['metodo'] as String? ?? '') {
+        case 'pix':
+          return 'PIX';
+        case 'credito':
+          return 'Cartão de crédito';
+        case 'debito':
+          return 'Cartão de débito';
+        case 'boleto':
+          return 'Boleto';
+        default:
+          return p['metodo'] as String? ?? '—';
+      }
+    }
+    final legado = _pedido['pagamento'] as String?;
+    if (legado == null) return '—';
+    return legado == 'cartao' ? 'Cartão de crédito' : 'PIX';
+  }
+
   Future<void> _atualizarLocal(Map<String, dynamic> novo) async {
     setState(() => _pedido = novo);
   }
@@ -158,7 +183,7 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     if (userId == null) return;
     final atualizado = await Supabase.instance.client
         .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)')
+        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)')
         .eq('id', p['id'])
         .eq('user_id', userId)
         .maybeSingle();
@@ -488,8 +513,8 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                 if (_subtotal > _total)
                   _linha('Desconto', '-R\$ ${(_subtotal - _total).toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
                 _linha('Entrega', entrega ? 'Entrega' : 'Retirada na unidade'),
-                _linha('Pagamento', _pedido['pagamento'] != null ? (_pedido['pagamento'] == 'cartao' ? 'Cartão de crédito' : 'PIX') : '—'),
-                if (_pedido['transacao_id'] != null)
+                _linha('Pagamento', _rotuloPagamento),
+                if (_pagamentoGravado == null && _pedido['transacao_id'] != null)
                   _linha('Transação', '#${_pedido['transacao_id']}'),
                 const Divider(height: 20),
                 _linha('Total', 'R\$ ${_total.toStringAsFixed(2)}', bold: true),
@@ -497,6 +522,15 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
+
+          // Comprovante de pagamento (PagBank) — padrão grandes lojas
+          if (_pagamentoGravado != null) ...[
+            const Text('Comprovante de pagamento',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const SizedBox(height: AppSpacing.sm),
+            ComprovantePagamento(dados: _pagamentoGravado!),
+            const SizedBox(height: AppSpacing.lg),
+          ],
 
           // Loja
           if (unidade != null)

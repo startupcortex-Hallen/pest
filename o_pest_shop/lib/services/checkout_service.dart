@@ -26,8 +26,11 @@ class CheckoutService {
 
   /// Cria os pedidos por unidade (marketplace) de forma ATÔMICA no banco
   /// (RPC `finalizar_checkout`): valida estoque server-side, grava pedido +
-  /// itens + PIX da unidade e o uso do cupom em UMA transação. Se algo
-  /// falhar, nada é persistido — sem pedidos "fantasma" ou duplicados.
+  /// itens + o uso do cupom em UMA transação. Se algo falhar, nada é
+  /// persistido — sem pedidos "fantasma" ou duplicados.
+  ///
+  /// O pagamento real (PIX/crédito/débito/boleto) acontece em seguida pela
+  /// Edge Function `pagamentos` (PagBank) — nunca mais pelo cliente.
   ///
   /// [cupomDescontoTotal] é o valor R$ do desconto do cupom sobre o subtotal
   /// geral — distribuído proporcionalmente entre os pedidos de cada unidade.
@@ -79,36 +82,5 @@ class CheckoutService {
       // Transação revertida no banco — o erro já traz o contexto.
       throw StateError('Não foi possível finalizar o pedido. $e');
     }
-  }
-
-  /// Confirma o pagamento via RPC (idempotente): só o dono e apenas se o
-  /// pedido ainda estiver pendente. O trigger do banco faz a baixa de
-  /// estoque (atômica) e avança para "em preparo" automaticamente.
-  Future<void> confirmarPagamento({
-    required String userId,
-    required int pedidoId,
-    required String metodo,
-  }) async {
-    await _client.rpc('confirmar_pagamento', params: {
-      'p_pedido_id': pedidoId,
-      'p_metodo': metodo,
-    });
-  }
-
-  /// Autorização de cartão — SIMULADA no servidor (sem gateway real).
-  /// Valida permissões do pedido/cartão e a validade, grava a transação e
-  /// aprova o pagamento (o trigger baixa estoque e avança para "em preparo").
-  Future<Map<String, dynamic>> processarPagamentoCartao({
-    required int pedidoId,
-    required int cartaoId,
-    required int parcelas,
-  }) async {
-    final result = await _client.rpc('processar_pagamento_cartao', params: {
-      'p_pedido_id': pedidoId,
-      'p_cartao_id': cartaoId,
-      'p_parcelas': parcelas,
-    });
-    if (result is Map) return Map<String, dynamic>.from(result);
-    return const {};
   }
 }

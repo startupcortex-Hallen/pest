@@ -7,6 +7,7 @@ import '../../../../core/helpers/theme_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../services/admin_service.dart';
 import '../../../widgets/animated_card_entry.dart';
+import '../../../widgets/comprovante_pagamento.dart';
 import '../admin_utils.dart';
 
 class PedidosTab extends StatefulWidget {
@@ -282,6 +283,59 @@ class _PedidosTabState extends State<PedidosTab> {
     return null;
   }
 
+  /// Rótulo da forma de pagamento (PagBank) exibida no card do pedido.
+  String _rotuloMetodoPagamento(String? metodo) {
+    switch (metodo) {
+      case 'pix':
+        return 'PIX';
+      case 'credito':
+        return 'Crédito';
+      case 'debito':
+        return 'Débito';
+      case 'boleto':
+        return 'Boleto';
+      case 'cartao':
+        return 'Crédito';
+      default:
+        return 'Pagamento';
+    }
+  }
+
+  String _rotuloStatusPagamento(String? status) {
+    switch (status) {
+      case 'pago':
+        return 'pago';
+      case 'em_analise':
+        return 'em análise';
+      case 'recusado':
+        return 'recusado';
+      case 'expirado':
+        return 'expirado';
+      case 'cancelado':
+        return 'cancelado';
+      case 'estornado':
+        return 'estornado';
+      default:
+        return 'aguardando';
+    }
+  }
+
+  Color _corStatusPagamento(String? status) {
+    switch (status) {
+      case 'pago':
+        return const Color(0xFF00A650);
+      case 'em_analise':
+        return const Color(0xFFF2A33C);
+      case 'recusado':
+      case 'expirado':
+      case 'cancelado':
+      case 'estornado':
+        return const Color(0xFFF23D4F);
+      default:
+        return const Color(0xFF0084FF);
+    }
+  }
+
   Widget _buildPedidoCard(Map<String, dynamic> p, int index) {
     final perfil = p['perfis'] is Map ? (p['perfis'] as Map) : null;
     final unidade = p['unidades'] is Map ? (p['unidades'] as Map)['nome'] as String? : null;
@@ -292,6 +346,9 @@ class _PedidosTabState extends State<PedidosTab> {
     final cor = corStatusPedido(status);
     final itens = (p['pedido_itens'] as List?) ?? [];
     final expandido = _expandidos.contains(p['id']);
+    final pagamento = p['pagamentos'] is Map
+        ? (p['pagamentos'] as Map).cast<String, dynamic>()
+        : null;
 
     return AnimatedCardEntry(
       index: index,
@@ -317,6 +374,16 @@ class _PedidosTabState extends State<PedidosTab> {
                 children: [
                   Text('${formatarMoeda(p['total'])}  •  ${formatarData(p['created_at'] as String?)}',
                       style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context))),
+                  if (pagamento != null)
+                    Text(
+                      '${_rotuloMetodoPagamento(pagamento['metodo'] as String?)}'
+                      ' • ${_rotuloStatusPagamento(pagamento['status'] as String?)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _corStatusPagamento(pagamento['status'] as String?),
+                      ),
+                    ),
                   if (unidade != null)
                     Text(unidade,
                         style: TextStyle(
@@ -408,6 +475,18 @@ class _PedidosTabState extends State<PedidosTab> {
                             : 'Retirada na unidade',
                         style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context)),
                       ),
+                    ],
+                    // Comprovante de pagamento (PagBank) — o admin vê tudo:
+                    // método, status, IDs, PIX/boleto/cartão e pode copiar.
+                    if (pagamento != null) ...[
+                      const SizedBox(height: 10),
+                      Text('Comprovante de pagamento',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: ThemeColors.secondaryText(context))),
+                      const SizedBox(height: 6),
+                      ComprovantePagamento(dados: pagamento, compacto: true),
                     ],
                     const SizedBox(height: 8),
                     // Atribuir entregador (cache — sem N+1)

@@ -223,7 +223,7 @@ class AdminService {
   Future<List<Map<String, dynamic>>> fetchPedidos({String? status, String? busca}) async {
     var query = _client
         .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), perfis!pedidos_user_id_fkey(nome, email, telefone), unidades(nome)');
+        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), perfis!pedidos_user_id_fkey(nome, email, telefone), unidades(nome), pagamentos(*)');
     if (status != null && status.isNotEmpty) {
       query = query.eq('status', status);
     }

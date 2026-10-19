@@ -9,6 +9,11 @@ class CartaoCredito {
   final int anoValidade;
   final bool padrao;
 
+  /// Token do cartão no gateway (PagBank) — usado para pagar sem
+  /// redigitar os dados. Nulo em cartões antigos (apenas mascarados).
+  final String? gatewayCardId;
+  final String? holderCpf;
+
   CartaoCredito({
     required this.id,
     required this.userId,
@@ -19,6 +24,8 @@ class CartaoCredito {
     required this.mesValidade,
     required this.anoValidade,
     this.padrao = false,
+    this.gatewayCardId,
+    this.holderCpf,
   });
 
   String get bandeiraIcon {
@@ -39,16 +46,23 @@ class CartaoCredito {
   }
 
   factory CartaoCredito.fromJson(Map<String, dynamic> json) {
+    int paraInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      return int.tryParse('$v') ?? fallback;
+    }
+
     return CartaoCredito(
-      id: json['id'] as int,
-      userId: json['user_id'] as String,
+      id: paraInt(json['id'], 0),
+      userId: json['user_id'] as String? ?? '',
       apelido: json['apelido'] as String? ?? '',
       numeroMascarado: json['numero_mascarado'] as String? ?? '',
       bandeira: json['bandeira'] as String? ?? '',
       titular: json['titular'] as String? ?? '',
-      mesValidade: json['mes_validade'] as int? ?? 1,
-      anoValidade: json['ano_validade'] as int? ?? 2030,
+      mesValidade: paraInt(json['mes_validade'], 1),
+      anoValidade: paraInt(json['ano_validade'], 2030),
       padrao: json['padrao'] as bool? ?? false,
+      gatewayCardId: json['gateway_card_id'] as String?,
+      holderCpf: json['holder_cpf'] as String?,
     );
   }
 
@@ -61,5 +75,7 @@ class CartaoCredito {
         'mes_validade': mesValidade,
         'ano_validade': anoValidade,
         'padrao': padrao,
+        if (gatewayCardId != null) 'gateway_card_id': gatewayCardId,
+        if (holderCpf != null) 'holder_cpf': holderCpf,
       };
 }

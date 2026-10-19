@@ -487,7 +487,7 @@ class _CartScreenState extends State<CartScreen> {
             _linhaConfirm('Total', 'R\$ ${total.toStringAsFixed(2)}', bold: true),
             const SizedBox(height: 8),
             const Text(
-              'Você será direcionado para o pagamento via PIX da unidade.',
+              'Você será direcionado para o pagamento: PIX, cartão de crédito, débito ou boleto.',
               style: TextStyle(fontSize: 12, color: Color(0xFFC6C6C6)),
             ),
           ],
