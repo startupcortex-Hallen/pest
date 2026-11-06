@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../models/produto.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../providers/favorito_provider.dart';
 import '../../../services/produto_service.dart';
@@ -103,29 +104,37 @@ if (mounted) {
 
 Future<void> _loadRecomendados(Produto produto) async {
     try {
-      final res = await Supabase.instance.client
-          .from('produtos')
-          .select('*, categorias(nome), marcas(nome), unidades(nome)')
-          .eq('categoria_id', produto.categoriaId)
-          .neq('id', produto.id)
-          .order('id')
-          .limit(10);
-      var lista = res is List ? res : [];
-      if (lista.isEmpty) {
-        final res2 = await Supabase.instance.client
-            .from('produtos')
-            .select('*, categorias(nome), marcas(nome), unidades(nome)')
-            .neq('id', produto.id)
-            .order('id')
-            .limit(10);
-        lista = res2 is List ? res2 : [];
-      }
-      if (mounted) {
-        setState(() {
-          _recomendados = lista.map((j) => Produto.fromJson(j as Map<String, dynamic>)).toList();
-        });
-      }
+      final lista = await ProdutoService().fetchRecomendados(
+        produto.id,
+        categoriaId: produto.categoriaId,
+      );
+      if (mounted) setState(() => _recomendados = lista);
     } catch (_) {}
+  }
+
+  Future<bool> _exigirLogin() async {
+    if (context.read<AuthProvider>().isAuthenticated) return true;
+    final ir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Entre para continuar'),
+        content: const Text(
+          'Crie sua conta ou faça login para comprar, favoritar e acompanhar seus pedidos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Agora não'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Entrar'),
+          ),
+        ],
+      ),
+    );
+    if (ir == true && mounted) context.push('/login');
+    return false;
   }
 
   Future<void> _compartilhar() async {
@@ -407,7 +416,10 @@ Container(
                           isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                           color: isFav ? const Color(0xFFF23D4F) : Colors.white,
                         ),
-                        onPressed: () => fav.toggle(widget.produtoId),
+                        onPressed: () async {
+                          if (!await _exigirLogin()) return;
+                          await fav.toggle(widget.produtoId);
+                        },
                       );
                     },
                   ),
@@ -509,7 +521,9 @@ Container(
           ),
           ElevatedButton(
             onPressed: () async {
+              if (!await _exigirLogin()) return;
               if (!isFav) await fav.toggle(produto.id);
+              if (!ctx.mounted) return;
               Navigator.pop(ctx);
               messenger.showSnackBar(SnackBar(
                 content: Text(
@@ -859,6 +873,7 @@ const Text('Descrição', style: TextStyle(fontSize: 16, fontWeight: FontWeight.
                               );
                               return;
                             }
+                            if (!await _exigirLogin()) return;
                             final ok = await context
                                 .read<CartProvider>()
                                 .adicionar(widget.produtoId, quantidade: _quantidade, cor: _corSelecionada);
@@ -895,6 +910,7 @@ const Text('Descrição', style: TextStyle(fontSize: 16, fontWeight: FontWeight.
                   child: esgotado
                       ? ElevatedButton.icon(
                           onPressed: () async {
+                            if (!await _exigirLogin()) return;
                             final fav = context.read<FavoritoProvider>();
                             final jaFav = fav.isFavorito(widget.produtoId);
                             if (!jaFav) await fav.toggle(widget.produtoId);
@@ -939,6 +955,7 @@ const Text('Descrição', style: TextStyle(fontSize: 16, fontWeight: FontWeight.
                               return;
                             }
                             // Soma à quantidade já existente no carrinho (se houver)
+                            if (!await _exigirLogin()) return;
                             final ok = await context.read<CartProvider>().adicionar(
                                   widget.produtoId,
                                   quantidade: _quantidade,

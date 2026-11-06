@@ -12,6 +12,7 @@ class UserProfile {
   final String? objetivo;
   final String? codigo;
   final int pontos;
+  final String statusConta;
 
   UserProfile({
     required this.id,
@@ -27,6 +28,7 @@ class UserProfile {
     this.objetivo,
     this.codigo,
     this.pontos = 0,
+    this.statusConta = 'ativo',
   });
 
   bool get isAdmin => funcao == 'admin';
@@ -55,6 +57,7 @@ class UserProfile {
       objetivo: json['objetivo'] as String?,
       codigo: json['codigo'] as String?,
       pontos: json['pontos'] as int? ?? 0,
+      statusConta: json['status_conta'] as String? ?? 'ativo',
     );
   }
 

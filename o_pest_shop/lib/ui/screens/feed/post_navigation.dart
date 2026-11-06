@@ -3,7 +3,6 @@ import 'aviso_detail_screen.dart';
 import 'evento_detail_screen.dart';
 import 'novidade_detail_screen.dart';
 import 'post_detail_screen.dart';
-import 'vaga_detail_screen.dart';
 
 void pushPostDetail(BuildContext context, String postId, String categoria) {
   final Widget screen;
@@ -14,8 +13,6 @@ void pushPostDetail(BuildContext context, String postId, String categoria) {
     screen = NovidadeDetailScreen(postId: postId);
   } else if (cat.startsWith('evento')) {
     screen = EventoDetailScreen(postId: postId);
-  } else if (cat.startsWith('vaga')) {
-    screen = VagaDetailScreen(postId: postId);
   } else {
     screen = PostDetailScreen(postId: postId);
   }

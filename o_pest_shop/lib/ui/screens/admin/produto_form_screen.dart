@@ -13,7 +13,8 @@ import '../../../core/theme/app_colors.dart';
 
 class ProdutoFormScreen extends StatefulWidget {
   final Map<String, dynamic>? produto;
-  const ProdutoFormScreen({super.key, this.produto});
+  final int? unidadeFixaId;
+  const ProdutoFormScreen({super.key, this.produto, this.unidadeFixaId});
 
   @override
   State<ProdutoFormScreen> createState() => _ProdutoFormScreenState();
@@ -43,13 +44,25 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
   final _descCtrl = TextEditingController();
   final _precoCtrl = TextEditingController();
   final _precoPromocionalCtrl = TextEditingController();
+  final _skuCtrl = TextEditingController();
+  final _gtinCtrl = TextEditingController();
+  final _pesoCtrl = TextEditingController();
+  final _comprimentoCtrl = TextEditingController();
+  final _larguraCtrl = TextEditingController();
+  final _alturaCtrl = TextEditingController();
+  final _custoCtrl = TextEditingController();
+  final _mlCategoryCtrl = TextEditingController();
   final _adminService = AdminService();
 
   int? _categoriaId;
   int? _marcaId;
   bool _emPromocao = false;
   bool _freteGratis = false;
+  bool _ativo = true;
   bool _saving = false;
+  bool _mlSyncEnabled = false;
+  String _condicao = 'new';
+  String _mlListingType = 'gold_special';
   int? _unidadeIdEditando;
 
   int _estoque = 1;
@@ -102,9 +115,22 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
       _marcaId = p['marca_id'] as int?;
       _emPromocao = p['em_promocao'] == true;
       _freteGratis = p['frete_gratis'] == true;
+      _ativo = p['ativo'] != false;
       _estoque = p['estoque'] as int? ?? 1;
       _unidadeIdEditando = p['unidade_id'] as int?;
+      _skuCtrl.text = p['sku'] as String? ?? '';
+      _gtinCtrl.text = p['gtin'] as String? ?? '';
+      _pesoCtrl.text = (p['peso_kg'] as num?)?.toString() ?? '';
+      _comprimentoCtrl.text = (p['comprimento_cm'] as num?)?.toString() ?? '';
+      _larguraCtrl.text = (p['largura_cm'] as num?)?.toString() ?? '';
+      _alturaCtrl.text = (p['altura_cm'] as num?)?.toString() ?? '';
+      _custoCtrl.text = (p['custo'] as num?)?.toString() ?? '';
+      _mlCategoryCtrl.text = p['ml_category_id'] as String? ?? '';
+      _mlSyncEnabled = p['ml_sync_enabled'] == true;
+      _condicao = p['condicao'] as String? ?? 'new';
+      _mlListingType = p['ml_listing_type'] as String? ?? 'gold_special';
     }
+    _unidadeIdEditando ??= widget.unidadeFixaId;
   }
 
   @override
@@ -113,6 +139,14 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
     _descCtrl.dispose();
     _precoCtrl.dispose();
     _precoPromocionalCtrl.dispose();
+    _skuCtrl.dispose();
+    _gtinCtrl.dispose();
+    _pesoCtrl.dispose();
+    _comprimentoCtrl.dispose();
+    _larguraCtrl.dispose();
+    _alturaCtrl.dispose();
+    _custoCtrl.dispose();
+    _mlCategoryCtrl.dispose();
     super.dispose();
   }
 
@@ -128,6 +162,16 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
         _categorias = cats.map((c) => {'id': c.id, 'nome': c.nome}).toList();
         _marcas = marcas;
         _unidades = (unidades as List).cast<Map<String, dynamic>>();
+        if (widget.unidadeFixaId != null) {
+          _unidades = _unidades
+              .where((u) => u['id'] == widget.unidadeFixaId)
+              .toList();
+          _unidadeIdEditando = widget.unidadeFixaId;
+          if (_unidades.isNotEmpty) {
+            _unidadeNome =
+                '${_unidades.first['nome']} (${_unidades.first['bairro'] ?? ''})';
+          }
+        }
         if (_categoriaId != null) {
           _categoriaNome = _categorias.firstWhere((c) => c['id'] == _categoriaId, orElse: () => {'nome': ''})['nome'] as String?;
         }
@@ -146,7 +190,12 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
 
   Future<void> _pickImageForSlot(int slotIndex) async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 75,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (file == null) return;
 
     try {
@@ -191,8 +240,10 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
       erro = 'Selecione uma categoria.';
     } else if (_marcaId == null) {
       erro = 'Selecione uma marca.';
-    } else if (_unidadeIdEditando == null) {
+    } else if (_unidadeIdEditando == null && widget.unidadeFixaId == null) {
       erro = 'Selecione uma unidade.';
+    } else if (_mlSyncEnabled && _skuCtrl.text.trim().isEmpty) {
+      erro = 'Informe o SKU para sincronizar com o Mercado Livre.';
     } else if (_emPromocao) {
       final promoText = _precoPromocionalCtrl.text.replaceAll(',', '.').trim();
       final promo = double.tryParse(promoText);
@@ -223,6 +274,23 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
       'marca_id': _marcaId,
       'em_promocao': _emPromocao,
       'frete_gratis': _freteGratis,
+      'ativo': _ativo,
+      'sku': _skuCtrl.text.trim().isEmpty ? null : _skuCtrl.text.trim(),
+      'gtin': _gtinCtrl.text.trim().isEmpty ? null : _gtinCtrl.text.trim(),
+      'peso_kg': double.tryParse(_pesoCtrl.text.replaceAll(',', '.').trim()),
+      'comprimento_cm':
+          double.tryParse(_comprimentoCtrl.text.replaceAll(',', '.').trim()),
+      'largura_cm':
+          double.tryParse(_larguraCtrl.text.replaceAll(',', '.').trim()),
+      'altura_cm':
+          double.tryParse(_alturaCtrl.text.replaceAll(',', '.').trim()),
+      'custo': double.tryParse(_custoCtrl.text.replaceAll(',', '.').trim()),
+      'condicao': _condicao,
+      'ml_category_id': _mlCategoryCtrl.text.trim().isEmpty
+          ? null
+          : _mlCategoryCtrl.text.trim(),
+      'ml_listing_type': _mlListingType,
+      'ml_sync_enabled': _mlSyncEnabled,
     };
     if (_emPromocao) {
       final promoText = _precoPromocionalCtrl.text.replaceAll(',', '.').trim();
@@ -230,7 +298,10 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
     } else {
       data['preco_promocional'] = null;
     }
-    final unidadeId = _isEditing ? _unidadeIdEditando : _unidadeIdEditando ?? context.read<AuthProvider>().user?.unidadeId;
+    final unidadeId = widget.unidadeFixaId ??
+        (_isEditing
+            ? _unidadeIdEditando
+            : _unidadeIdEditando ?? context.read<AuthProvider>().user?.unidadeId);
     if (unidadeId != null) data['unidade_id'] = unidadeId;
     if (imagensValidas.isNotEmpty) data['url_imagem'] = imagensValidas;
     if (_cores.isNotEmpty) data['cores'] = List.from(_cores);
@@ -284,6 +355,8 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
                       _buildUnidadeSection(),
                       const SizedBox(height: AppSpacing.lg),
                       _buildPrecoEstoqueSection(),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildMercadoLivreSection(),
                       const SizedBox(height: AppSpacing.lg),
                       _buildEnvioSection(),
                       const SizedBox(height: AppSpacing.lg),
@@ -797,6 +870,16 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
             isPromo: true,
           ),
         ],
+        const SizedBox(height: AppSpacing.sm),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _ativo,
+          onChanged: (v) => setState(() => _ativo = v),
+          title: const Text('Produto ativo'),
+          subtitle: const Text(
+            'Desativado, o produto some do catálogo e não pode ser comprado.',
+          ),
+        ),
       ],
     );
   }
@@ -900,6 +983,173 @@ class _ProdutoFormScreenState extends State<ProdutoFormScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMercadoLivreSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader('Catálogo e Mercado Livre'),
+        const SizedBox(height: 8),
+        Text(
+          'SKU, dimensões e categoria são obrigatórios para publicar e sincronizar no Mercado Livre.',
+          style: TextStyle(fontSize: 11, color: AppColors.secondaryText),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildTexto(
+                label: 'SKU',
+                controller: _skuCtrl,
+                hint: 'Ex: CAM-PRETO-M',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildTexto(
+                label: 'GTIN/EAN',
+                controller: _gtinCtrl,
+                hint: 'Opcional',
+                keyboardType: TextInputType.number,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildTexto(
+                label: 'Peso (kg)',
+                controller: _pesoCtrl,
+                hint: 'Ex: 0,35',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildTexto(
+                label: 'Compr. (cm)',
+                controller: _comprimentoCtrl,
+                hint: 'Ex: 30',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildTexto(
+                label: 'Larg. (cm)',
+                controller: _larguraCtrl,
+                hint: 'Ex: 20',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildTexto(
+                label: 'Alt. (cm)',
+                controller: _alturaCtrl,
+                hint: 'Ex: 5',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _condicao,
+                decoration: _campoDecoracao('Condição'),
+                items: const [
+                  DropdownMenuItem(value: 'new', child: Text('Novo')),
+                  DropdownMenuItem(value: 'used', child: Text('Usado')),
+                  DropdownMenuItem(
+                    value: 'not_specified',
+                    child: Text('Não especificado'),
+                  ),
+                ],
+                onChanged: (v) => setState(() => _condicao = v ?? 'new'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _mlListingType,
+                decoration: _campoDecoracao('Tipo de anúncio'),
+                items: const [
+                  DropdownMenuItem(value: 'gold_special', child: Text('Clássico')),
+                  DropdownMenuItem(value: 'gold_pro', child: Text('Premium')),
+                  DropdownMenuItem(value: 'free', child: Text('Grátis')),
+                ],
+                onChanged: (v) =>
+                    setState(() => _mlListingType = v ?? 'gold_special'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildTexto(
+                label: 'Custo (R\$)',
+                controller: _custoCtrl,
+                hint: 'Opcional',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: _buildTexto(
+                label: 'Categoria ML',
+                controller: _mlCategoryCtrl,
+                hint: 'Ex: MLB31447',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Sincronizar com Mercado Livre'),
+          subtitle: const Text(
+            'Publica/atualiza estoque e preço quando a loja estiver conectada.',
+            style: TextStyle(fontSize: 11),
+          ),
+          value: _mlSyncEnabled,
+          onChanged: (v) => setState(() => _mlSyncEnabled = v),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTexto({
+    required String label,
+    required TextEditingController controller,
+    String? hint,
+    TextInputType? keyboardType,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: _campoDecoracao(label, hint: hint),
+    );
+  }
+
+  InputDecoration _campoDecoracao(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      isDense: true,
     );
   }
 

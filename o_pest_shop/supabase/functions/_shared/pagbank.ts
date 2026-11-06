@@ -36,34 +36,84 @@ export class PagBankError extends Error {
   }
 }
 
+const TIMEOUT_MS = 15_000;
+const MAX_TENTATIVAS_GET = 3;
+
+function dormir(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function metodoSeguro(init: RequestInit): boolean {
+  const metodo = (init.method ?? 'GET').toUpperCase();
+  return metodo === 'GET' || metodo === 'HEAD';
+}
+
 export async function pagbankFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Record<string, unknown>> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${pagbankToken()}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
-  const texto = await resp.text();
-  let corpo: unknown = null;
-  try {
-    corpo = texto ? JSON.parse(texto) : null;
-  } catch {
-    corpo = texto;
+  const tentativas = metodoSeguro(init) ? MAX_TENTATIVAS_GET : 1;
+  let ultimoErro: unknown;
+
+  for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+    try {
+      const resp = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: {
+          Authorization: `Bearer ${pagbankToken()}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...(init.headers ?? {}),
+        },
+      });
+      const texto = await resp.text();
+      let corpo: unknown = null;
+      try {
+        corpo = texto ? JSON.parse(texto) : null;
+      } catch {
+        corpo = texto;
+      }
+      if (!resp.ok) {
+        const detalhe = corpo as Record<string, unknown> | null;
+        const mensagem = (detalhe?.['error_messages'] as Array<Record<string, unknown>> | undefined)
+          ?.map((e) => `${e['description'] ?? e['code']}`)
+          .join(' • ') ?? `PagBank retornou HTTP ${resp.status}`;
+
+        // 429/5xx em GET são transitórios: tenta novamente com backoff.
+        if (tentativa < tentativas && (resp.status === 429 || resp.status >= 500)) {
+          ultimoErro = new PagBankError(mensagem, resp.status, corpo);
+          await dormir(400 * Math.pow(2, tentativa - 1) + Math.random() * 250);
+          continue;
+        }
+        throw new PagBankError(mensagem, resp.status, corpo);
+      }
+      return (corpo as Record<string, unknown>) ?? {};
+    } catch (erro) {
+      ultimoErro = erro;
+      const abortado = erro instanceof DOMException &&
+        (erro.name === 'TimeoutError' || erro.name === 'AbortError');
+      const transitorio = abortado ||
+        erro instanceof TypeError ||
+        (erro instanceof PagBankError && (erro.status === 429 || erro.status >= 500));
+      if (tentativa < tentativas && transitorio) {
+        await dormir(400 * Math.pow(2, tentativa - 1) + Math.random() * 250);
+        continue;
+      }
+      if (abortado) {
+        throw new PagBankError(
+          'O PagBank demorou para responder. Tente novamente em instantes.',
+          504,
+          { timeout: true },
+        );
+      }
+      throw erro;
+    }
   }
-  if (!resp.ok) {
-    const detalhe = corpo as Record<string, unknown> | null;
-    const mensagem = (detalhe?.['error_messages'] as Array<Record<string, unknown>> | undefined)
-      ?.map((e) => `${e['description'] ?? e['code']}`)
-      .join(' • ') ?? `PagBank retornou HTTP ${resp.status}`;
-    throw new PagBankError(mensagem, resp.status, corpo);
-  }
-  return (corpo as Record<string, unknown>) ?? {};
+
+  throw ultimoErro instanceof Error
+    ? ultimoErro
+    : new Error('Falha ao consultar o PagBank.');
 }
 
 // ─── Chave pública (criptografia de cartão no navegador) ───────
@@ -106,6 +156,7 @@ export async function obterSessao3ds(): Promise<string> {
   }
   const resp = await fetch(`${SDK_BASE}/checkout-sdk/sessions`, {
     method: 'POST',
+    signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${pagbankToken()}`,
       'Content-Type': 'application/json',
@@ -141,11 +192,16 @@ export function mapearStatus(chargeStatus: string): string {
     case 'CANCELED':
       return 'cancelado';
     case 'REFUNDED':
+    case 'CHARGEBACK':
       return 'estornado';
     case 'AUTHORIZED':
+      return 'em_analise';
     case 'WAITING':
-    default:
       return 'pendente';
+    default:
+      // Status novo/desconhecido não pode regredir um pagamento já aprovado.
+      // Mantém em análise para a conciliação resolver com segurança.
+      return 'em_analise';
   }
 }
 
@@ -162,6 +218,12 @@ export function extrairComprovante(order: Record<string, unknown>) {
       | string
       | undefined;
 
+  const amount =
+    (charge['amount'] as Record<string, unknown> | undefined) ??
+    (order['amount'] as Record<string, unknown> | undefined) ??
+    {};
+  const valorCentavos = Number(amount['value'] ?? 0);
+
   const comprovante: Record<string, unknown> = {
     gateway_order_id: order['id'] as string | undefined,
     gateway_charge_id: charge['id'] as string | undefined,
@@ -170,6 +232,9 @@ export function extrairComprovante(order: Record<string, unknown>) {
     payment_response: charge['payment_response'],
     paid_at: charge['paid_at'],
   };
+  if (Number.isFinite(valorCentavos) && valorCentavos > 0) {
+    comprovante['valor_centavos'] = valorCentavos;
+  }
 
   if (tipo === 'PIX') {
     const qr = (charge['qr_code'] as Record<string, unknown> | undefined) ?? {};

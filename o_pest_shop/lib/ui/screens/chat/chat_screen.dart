@@ -12,12 +12,14 @@ class ChatScreen extends StatefulWidget {
   final int unidadeId;
   final String unidadeNome;
   final String? unidadeFotoUrl;
+  final int? conversaId;
 
   const ChatScreen({
     super.key,
     required this.unidadeId,
     required this.unidadeNome,
     this.unidadeFotoUrl,
+    this.conversaId,
   });
 
   @override
@@ -54,9 +56,16 @@ class _ChatScreenState extends State<ChatScreen> {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null) { if (mounted) context.go('/login'); return; }
     try {
-      _conversaId = await _service.buscarOuCriarConversa(userId, widget.unidadeId);
+      if (widget.conversaId != null) {
+        _conversaId = widget.conversaId;
+      } else {
+        _conversaId = await _service.buscarOuCriarConversa(userId, widget.unidadeId);
+      }
       _mensagens = await _service.fetchMensagens(_conversaId!);
-      _pedidos = await _service.fetchPedidos(userId, widget.unidadeId);
+      _deduplicarMensagens();
+      if (widget.unidadeId > 0) {
+        _pedidos = await _service.fetchPedidos(userId, widget.unidadeId);
+      }
       _escutarMensagens();
     } catch (e) { debugPrint('Erro chat: $e'); }
     if (mounted) setState(() => _loading = false);
@@ -67,9 +76,20 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_conversaId == null) return;
     _realtimeChannel = _service.listenMensagens(_conversaId!, (novaMsg) {
       if (!mounted) return;
-      if (_mensagens.any((m) => m['id'] == novaMsg['id'])) return;
+      if (_mensagens.any(
+        (m) => m['id']?.toString() == novaMsg['id']?.toString(),
+      )) {
+        return;
+      }
       _buscarPerfilERefresh(novaMsg);
     });
+  }
+
+  void _deduplicarMensagens() {
+    final vistos = <String>{};
+    _mensagens = _mensagens
+        .where((m) => vistos.add(m['id']?.toString() ?? ''))
+        .toList();
   }
 
   Future<void> _buscarPerfilERefresh(Map<String, dynamic> msg) async {
@@ -104,6 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await _service.enviarMensagem(_conversaId!, userId, texto);
       _msgCtrl.clear();
       _mensagens = await _service.fetchMensagens(_conversaId!);
+      _deduplicarMensagens();
       if (mounted) setState(() {});
       _scrollParaBaixo();
     } catch (e) {

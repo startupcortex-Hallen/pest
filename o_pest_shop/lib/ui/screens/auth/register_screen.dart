@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/helpers/theme_colors.dart';
+import '../../../core/helpers/senha.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../providers/auth_provider.dart';
 import '../../widgets/custom_text_field.dart';
@@ -153,11 +154,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       controller: _passwordController,
                       onTrailingTap: () =>
                           setState(() => _obscurePassword = !_obscurePassword),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) return 'Informe sua senha';
-                        if (value.length < 6) return 'Senha deve ter no mínimo 6 caracteres';
-                        return null;
-                      },
+                      validator: validarSenhaForte,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     CustomTextField(

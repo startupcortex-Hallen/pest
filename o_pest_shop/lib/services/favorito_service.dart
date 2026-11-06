@@ -1,26 +1,33 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorito.dart';
 import '../models/produto.dart';
+import 'produto_service.dart';
 import 'supabase_service.dart';
 
 class FavoritoService {
   final SupabaseClient _client = SupabaseService.instance.client;
 
-  /// Produtos favoritados COM os dados completos (join com produtos).
-  /// É o que a tela de Favoritos usa — independe da Home.
+  /// Busca os IDs e depois os produtos na view pública. Evita o embed em
+  /// `produtos(*)` (que expunha custo e carregava colunas desnecessárias).
   Future<List<Produto>> fetchProdutosFavoritos(String userId) async {
-    final response = await _client
-        .from('favoritos')
-        .select(
-            'produto_id, produtos(*, marcas(nome), unidades(id, nome), categorias(nome))')
-        .eq('user_id', userId)
-        .order('id', ascending: false);
+    final ids = await fetchFavoritosIds(userId);
+    if (ids.isEmpty) return const [];
 
-    return response
-        .where((row) => row['produtos'] != null)
-        .map((row) => Produto.fromJson(
-            (row['produtos'] as Map).cast<String, dynamic>()))
-        .toList();
+    final response = await _client
+        .from('produtos_publicos')
+        .select(ProdutoService.publicColumns)
+        .inFilter('id', ids);
+
+    if (response is! List) return const [];
+    final porId = <int, Produto>{};
+    for (final row in response) {
+      final produto = Produto.fromJson(row as Map<String, dynamic>);
+      porId[produto.id] = produto;
+    }
+    return ids
+        .map((id) => porId[id])
+        .whereType<Produto>()
+        .toList(growable: false);
   }
 
   Future<List<Favorito>> fetchFavoritos(String userId) async {

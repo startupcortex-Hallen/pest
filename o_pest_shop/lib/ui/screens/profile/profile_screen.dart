@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
@@ -34,7 +33,7 @@ class ProfileScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildPerfilNutricao(context),
+                    _buildPerfilConta(context),
                     const SizedBox(height: AppSpacing.lg),
                     _buildSuaCarna(context),
                     const SizedBox(height: AppSpacing.lg),
@@ -55,7 +54,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _buildHeader(BuildContext context, UserProfile? user, String nome) {
     final isDark = context.watch<ThemeProvider>().isDark;
     return Container(
-      height: 420,
+      height: 360,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -147,7 +146,6 @@ class ProfileScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                _buildStatsCard(context, isDark, user),
               ],
             ),
           ),
@@ -174,79 +172,6 @@ class ProfileScreen extends StatelessWidget {
             size: 24),
         onPressed: onPressed ?? () {},
       ),
-    );
-  }
-
-  Widget _buildStatsCard(BuildContext context, bool isDark, UserProfile? user) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: (isDark
-                    ? AppColors.darkOnPrimary
-                    : AppColors.onPrimary)
-                .withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: (isDark
-                      ? AppColors.darkOnPrimary
-                      : AppColors.onPrimary)
-                  .withValues(alpha: 0.2),
-            ),
-          ),
-          child: Row(
-            children: [
-              _buildStatItem(context, '${user?.pontos ?? 0}', 'PONTOS'),
-              _buildStatDivider(isDark),
-              _buildStatItem(context, 'R\$ ${user?.pontos ?? 0}', 'INVESTIDO'),
-              _buildStatDivider(isDark),
-              _buildStatItem(context, '0', 'ASSINATURAS'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatItem(BuildContext context, String value, String label) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          Text(
-            label,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(
-                  color: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.color
-                      ?.withValues(alpha: 0.7),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatDivider(bool isDark) {
-    return Container(
-      width: 1,
-      height: 30,
-      color: (isDark ? AppColors.darkOnPrimary : AppColors.onPrimary)
-          .withValues(alpha: 0.2),
     );
   }
 
@@ -399,15 +324,17 @@ class ProfileScreen extends StatelessWidget {
     if (userId == null) return;
 
     try {
-      // Deleta avatar antigo se existir
+      // Deleta avatar antigo se existir (sempre dentro da pasta do usuário).
       final user = context.read<AuthProvider>().user;
       if (user?.avatarUrl != null && user!.avatarUrl!.contains('/fotos_perfil/')) {
         final oldFile = user.avatarUrl!.split('/fotos_perfil/').last;
-        await Supabase.instance.client.storage.from('fotos_perfil').remove([oldFile]);
+        if (oldFile.startsWith('$userId/')) {
+          await Supabase.instance.client.storage.from('fotos_perfil').remove([oldFile]);
+        }
       }
 
       final bytes = await file.readAsBytes();
-      final fileName = 'avatar_${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName = '$userId/avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await Supabase.instance.client.storage.from('fotos_perfil').uploadBinary(
         fileName, bytes,
         fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
@@ -419,13 +346,28 @@ class ProfileScreen extends StatelessWidget {
         'avatar_url': url,
       }).eq('id', userId);
 
-      if (context.mounted) await context.read<AuthProvider>().refreshProfile();
+      if (context.mounted) {
+        await context.read<AuthProvider>().refreshProfile();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Foto atualizada!')),
+          );
+        }
+      }
     } catch (e) {
       debugPrint('Erro upload foto: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Não foi possível enviar a foto: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
-  Widget _buildPerfilNutricao(BuildContext context) {
+  Widget _buildPerfilConta(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -446,16 +388,28 @@ class ProfileScreen extends StatelessWidget {
           index: 1,
           child: _buildProfileOption(
             context,
-            icon: Icons.shopping_bag_rounded,
-            title: 'Histórico de Compras',
-            subtitle: 'Tudo que você já comprou',
-            iconBgColor: AppColors.accent.withValues(alpha: 0.1),
-            iconColor: AppColors.primaryText,
+            icon: Icons.location_on_outlined,
+            title: 'Endereços de Entrega',
+            subtitle: 'Cadastre e gerencie seus endereços',
+            onTap: () => context.push('/enderecos'),
           ),
         ),
         const SizedBox(height: 12),
         AnimatedCardEntry(
           index: 2,
+          child: _buildProfileOption(
+            context,
+            icon: Icons.shopping_bag_rounded,
+            title: 'Histórico de Compras',
+            subtitle: 'Tudo que você já comprou',
+            iconBgColor: AppColors.accent.withValues(alpha: 0.1),
+            iconColor: AppColors.primaryText,
+            onTap: () => context.push('/pedidos'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        AnimatedCardEntry(
+          index: 3,
           child: _buildProfileOption(
             context,
             icon: Icons.favorite_rounded,
@@ -474,22 +428,10 @@ class ProfileScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle(context, 'TIPO DE PAGAMENTO'),
+        _buildSectionTitle(context, 'PAGAMENTO'),
         const SizedBox(height: AppSpacing.md),
         AnimatedCardEntry(
           index: 0,
-          child: _buildProfileOption(
-            context,
-            icon: Icons.card_membership_rounded,
-            title: 'Assinatura Ativa',
-            subtitle: 'Plano O Pest - membros da comunidade',
-            badge: 'EM BREVE',
-            onTap: () => context.push('/assinaturas'),
-          ),
-        ),
-        const SizedBox(height: 12),
-        AnimatedCardEntry(
-          index: 1,
           child: _buildProfileOption(
             context,
             icon: Icons.credit_card_rounded,

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/helpers/cpf.dart';
+import '../../../core/helpers/senha.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../providers/auth_provider.dart';
@@ -17,10 +19,15 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nomeController;
   late TextEditingController _cpfController;
+  late TextEditingController _telefoneController;
   bool _saving = false;
 
   final _cpfMask = MaskTextInputFormatter(
     mask: '###.###.###-##',
+    filter: {'#': RegExp(r'[0-9]')},
+  );
+  final _telefoneMask = MaskTextInputFormatter(
+    mask: '(##) #####-####',
     filter: {'#': RegExp(r'[0-9]')},
   );
 
@@ -31,12 +38,14 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
     _nomeController =
         TextEditingController(text: user?.nome ?? '');
     _cpfController = TextEditingController(text: user?.cpf ?? '');
+    _telefoneController = TextEditingController(text: user?.telefone ?? '');
   }
 
   @override
   void dispose() {
     _nomeController.dispose();
     _cpfController.dispose();
+    _telefoneController.dispose();
     super.dispose();
   }
 
@@ -52,10 +61,12 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
 
       final supabase = Supabase.instance.client;
       final nomeCompleto = _nomeController.text.trim();
-      await supabase.from('perfis').upsert({
-        'id': user.id,
+      await supabase.from('perfis').update({
         'nome': nomeCompleto,
         'cpf': _cpfController.text.trim().replaceAll(RegExp(r'\D'), ''),
+        'telefone': _telefoneController.text
+            .trim()
+            .replaceAll(RegExp(r'\D'), ''),
       }).eq('id', user.id);
 
       await auth.refreshProfile();
@@ -101,14 +112,9 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Nova senha',
-                  hintText: 'Mínimo 6 caracteres',
+                  hintText: 'Mínimo 8 caracteres (letras e números)',
                 ),
-                validator: (v) {
-                  if (v == null || v.length < 6) {
-                    return 'A senha deve ter no mínimo 6 caracteres';
-                  }
-                  return null;
-                },
+                validator: validarSenhaForte,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
@@ -190,8 +196,13 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
                 ),
                 textCapitalization: TextCapitalization.words,
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Informe seu nome completo';
+                  final partes = (value ?? '')
+                      .trim()
+                      .split(RegExp(r'\s+'))
+                      .where((p) => p.length >= 2)
+                      .length;
+                  if (partes < 2) {
+                    return 'Informe seu nome completo (nome e sobrenome)';
                   }
                   return null;
                 },
@@ -212,8 +223,31 @@ class _EditPersonalDataScreenState extends State<EditPersonalDataScreen> {
                 validator: (value) {
                   final digits =
                       (value ?? '').replaceAll(RegExp(r'\D'), '');
-                  if (digits.isNotEmpty && digits.length != 11) {
-                    return 'CPF deve ter 11 dígitos';
+                  if (digits.isEmpty) return null;
+                  if (digits.length != 11) return 'CPF deve ter 11 dígitos';
+                  if (!cpfValido(digits)) return 'CPF inválido';
+                  return null;
+                },
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: _telefoneController,
+                decoration: InputDecoration(
+                  labelText: 'Telefone/WhatsApp',
+                  hintText: '(11) 99999-9999',
+                  prefixIcon: const Icon(Icons.phone_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                ),
+                keyboardType: TextInputType.phone,
+                inputFormatters: [_telefoneMask],
+                validator: (value) {
+                  final digits =
+                      (value ?? '').replaceAll(RegExp(r'\D'), '');
+                  if (digits.isEmpty) return null;
+                  if (digits.length < 10 || digits.length > 11) {
+                    return 'Telefone inválido';
                   }
                   return null;
                 },

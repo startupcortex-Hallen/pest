@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../providers/app_config_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/feed_provider.dart';
 import '../../providers/home_provider.dart';
@@ -9,6 +11,7 @@ import '../screens/cart/cart_screen.dart';
 import '../screens/feed/feed_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/unidades/unidades_screen.dart';
+import '../widgets/login_required.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -17,61 +20,110 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  final Set<int> _visited = {0};
+  GoRouterDelegate? _routerDelegate;
+  HomeProvider? _homeProvider;
+  bool _listenerAdicionado = false;
 
-  final _screens = const [
-    HomeScreen(),
-    FeedScreen(),
-    UnidadesScreen(),
-    CartScreen(),
-    ProfileScreen(),
-  ];
+  List<Widget> _screens(bool isLoggedIn) => [
+        const HomeScreen(),
+        const FeedScreen(),
+        const UnidadesScreen(),
+        if (isLoggedIn)
+          const CartScreen()
+        else
+          const LoginRequired(
+            title: 'Seu carrinho',
+            message: 'Entre para adicionar produtos e finalizar a compra.',
+            icon: Icons.shopping_cart_outlined,
+          ),
+        if (isLoggedIn)
+          const ProfileScreen()
+        else
+          const LoginRequired(
+            title: 'Sua conta',
+            message: 'Entre para ver seus pedidos, favoritos e endereços.',
+            icon: Icons.person_outline_rounded,
+          ),
+      ];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      GoRouter.of(context).routerDelegate.addListener(_onRouteChanged);
-    });
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<AppConfigProvider>().load();
+      _homeProvider?.loadIfStale();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _homeProvider ??= context.read<HomeProvider>();
+    if (!_listenerAdicionado) {
+      _routerDelegate = GoRouter.of(context).routerDelegate;
+      _routerDelegate!.addListener(_onRouteChanged);
+      _listenerAdicionado = true;
+    }
   }
 
   @override
   void dispose() {
-    try {
-      GoRouter.of(context).routerDelegate.removeListener(_onRouteChanged);
-    } catch (e) {
-      debugPrint('Erro router: $e');
+    WidgetsBinding.instance.removeObserver(this);
+    if (_listenerAdicionado) {
+      _routerDelegate?.removeListener(_onRouteChanged);
+      _listenerAdicionado = false;
     }
     super.dispose();
   }
 
   void _onRouteChanged() {
-    final location = GoRouterState.of(context).uri.toString();
+    if (!mounted) return;
+    final location = _routerDelegate?.currentConfiguration.uri.toString() ?? '';
     if (location == '/') {
-      context.read<HomeProvider>().refresh();
+      _homeProvider?.loadIfStale();
     }
   }
 
   void _onTap(int index) {
     if (index == _currentIndex) return;
+
+    final isLoggedIn = context.read<AuthProvider>().isAuthenticated;
+    if (!isLoggedIn && (index == 3 || index == 4)) {
+      context.push('/login');
+      return;
+    }
+
     final navigator = Navigator.of(context);
     if (navigator.canPop()) navigator.pop();
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _visited.add(index);
+    });
     if (index == 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<HomeProvider>().refresh();
+        context.read<HomeProvider>().loadIfStale();
       });
     }
     if (index == 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<FeedProvider>().loadFeed();
+        context.read<FeedProvider>().loadIfStale();
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isLoggedIn = context.watch<AuthProvider>().isAuthenticated;
+    final config = context.watch<AppConfigProvider>();
+    final screens = _screens(isLoggedIn);
     final items = [
       _NavItem(Icons.store_rounded, Icons.store_rounded, 'Início'),
       _NavItem(Icons.rss_feed_rounded, Icons.rss_feed_rounded, 'Feed'),
@@ -82,9 +134,38 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
+      body: Column(
+        children: [
+          if (config.manutencao)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFF7A1018),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SafeArea(
+                bottom: false,
+                child: Text(
+                  config.mensagemManutencao ??
+                      'Estamos em manutenção. Algumas funções podem ficar indisponíveis.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: IndexedStack(
+              index: _currentIndex,
+              // Só constrói a aba quando ela é aberta pela primeira vez.
+              children: List.generate(
+                screens.length,
+                (i) => _visited.contains(i) ? screens[i] : const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

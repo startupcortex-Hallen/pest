@@ -6,6 +6,7 @@ import '../../../core/helpers/theme_colors.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../services/catalogo_service.dart';
 import '../../widgets/app_top_bar.dart';
 import '../../widgets/custom_drawer.dart';
 import '../../widgets/unit_card.dart';
@@ -52,28 +53,33 @@ class _UnidadesScreenState extends State<UnidadesScreen> {
       _erroMensagem = null;
     });
     try {
-      print('██ UNIDADES: _carregar() iniciou');
+      // Se a home já carregou o snapshot, as lojas vêm do cache local.
+      final cache = await CatalogoService().lerCache();
+      if (cache != null && cache.unidades.isNotEmpty) {
+        _unidades = cache.unidades;
+        _aplicarFiltro();
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
       final response = await Supabase.instance.client
-          .from('unidades')
-          .select()
-          .eq('ativa', true)
+          .from('unidades_publicas')
+          .select('id,nome,bairro,cidade,endereco,distancia,foto_url,'
+              'horario_seg,horario_ter,horario_qua,horario_qui,horario_sex,'
+              'horario_sab,horario_dom,ordem')
           .order('ordem', ascending: true);
-      print('██ UNIDADES: resposta tipo=${response.runtimeType}');
       if (response is List) {
         _unidades = response.cast<Map<String, dynamic>>();
-        print('██ UNIDADES: ${_unidades.length} registros');
       } else {
         _unidades = [];
-        _erroMensagem = 'Resposta inesperada: ${response.runtimeType}';
+        _erroMensagem = 'Não foi possível carregar as lojas.';
       }
-    } catch (e, stack) {
+    } catch (e) {
       _unidades = [];
-      _erroMensagem = 'Erro: $e';
-      print('██ UNIDADES: ERRO=$e');
-      print('██ UNIDADES: STACK=$stack');
+      _erroMensagem = 'Erro ao carregar lojas. Tente novamente.';
+      debugPrint('UNIDADES erro: $e');
     }
     _aplicarFiltro();
-    print('██ UNIDADES: _filtradas=${_filtradas.length} _erro=$_erroMensagem');
     if (mounted) setState(() => _loading = false);
   }
 

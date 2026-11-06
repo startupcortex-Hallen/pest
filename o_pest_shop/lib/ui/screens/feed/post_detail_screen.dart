@@ -488,7 +488,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   Text(p.autorNome,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 2),
-                  Text(p.categoria == 'vagas' ? 'Recrutador' : 'Colaborador',
+                  Text('Colaborador',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.secondaryText)),
                 ],
               ),

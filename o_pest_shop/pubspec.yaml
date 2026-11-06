@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.16.0
   cached_network_image: ^3.4.1
+  shared_preferences: ^2.3.3
   go_router: ^17.3.0
   google_fonts: ^8.1.0
   provider: ^6.1.5+1
@@ -86,7 +87,6 @@ flutter:
 
   assets:
     - assets/logo.jpg
-    - assets/banner.png
     - assets/clock_animation.json
 
   # An image asset can refer to one or more resolution-specific "variants", see

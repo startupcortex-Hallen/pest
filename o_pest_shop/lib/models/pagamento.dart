@@ -24,8 +24,11 @@ class Pagamento {
   final int parcelas;
 
   final String? motivoRecusa;
+  final bool revisaoManual;
+  final String? revisaoMotivo;
   final DateTime? expiraEm;
   final DateTime? pagoEm;
+  final DateTime? estornadoEm;
   final DateTime? createdAt;
 
   Pagamento({
@@ -48,8 +51,11 @@ class Pagamento {
     this.cartaoAutorizacao,
     this.parcelas = 1,
     this.motivoRecusa,
+    this.revisaoManual = false,
+    this.revisaoMotivo,
     this.expiraEm,
     this.pagoEm,
+    this.estornadoEm,
     this.createdAt,
   });
 
@@ -63,6 +69,8 @@ class Pagamento {
         return 'Cartão de débito';
       case 'boleto':
         return 'Boleto';
+      case 'manual':
+        return 'Pagamento manual';
       default:
         return metodo;
     }
@@ -124,8 +132,11 @@ class Pagamento {
       cartaoAutorizacao: json['cartao_autorizacao'] as String?,
       parcelas: (json['parcelas'] as num?)?.toInt() ?? 1,
       motivoRecusa: json['motivo_recusa'] as String?,
+      revisaoManual: json['revisao_manual'] == true,
+      revisaoMotivo: json['revisao_motivo'] as String?,
       expiraEm: paraData(json['expira_em']),
       pagoEm: paraData(json['pago_em']),
+      estornadoEm: paraData(json['estornado_em']),
       createdAt: paraData(json['created_at']),
     );
   }

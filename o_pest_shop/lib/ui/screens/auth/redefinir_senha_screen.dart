@@ -5,6 +5,7 @@ import '../../../core/constants/auth_notifier.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/helpers/theme_colors.dart';
+import '../../../core/helpers/senha.dart';
 import '../../../providers/auth_provider.dart';
 import '../../widgets/custom_text_field.dart';
 
@@ -101,19 +102,14 @@ class _RedefinirSenhaScreenState extends State<RedefinirSenhaScreen> {
                 const SizedBox(height: AppSpacing.lg),
                 CustomTextField(
                   label: 'Nova senha',
-                  hint: 'Mínimo 6 caracteres',
+                  hint: 'Mínimo 8 caracteres (letras e números)',
                   leadingIcon: Icons.lock_outline_rounded,
                   trailingIcon:
                       _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
                   obscureText: _obscure,
                   controller: _senhaCtrl,
                   onTrailingTap: () => setState(() => _obscure = !_obscure),
-                  validator: (value) {
-                    if (value == null || value.length < 6) {
-                      return 'A senha deve ter no mínimo 6 caracteres';
-                    }
-                    return null;
-                  },
+                  validator: validarSenhaForte,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 CustomTextField(

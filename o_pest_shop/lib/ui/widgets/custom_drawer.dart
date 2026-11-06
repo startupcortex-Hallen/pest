@@ -12,6 +12,7 @@ class CustomDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
+    final logado = user != null;
     final funcao = user?.funcao ?? 'usuario';
 
     return Drawer(
@@ -21,19 +22,31 @@ class CustomDrawer extends StatelessWidget {
           bottom: false,
           child: Column(
             children: [
-              _buildHeader(context, user?.nome ?? 'Usuário',
-                  user?.email ?? ''),
+              _buildHeader(
+                context,
+                user?.nome ?? 'Visitante',
+                user?.email ?? 'Navegue pelo catálogo sem cadastro',
+              ),
               Expanded(
                 child: ListView(
                   padding: EdgeInsets.zero,
                   children: [
                     _DrawerItem(
                       icon: Icons.admin_panel_settings_rounded,
-                      label: 'Área do Admin',
+                      label: 'Area do Admin',
                       visible: funcao == 'admin',
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/admin');
+                      },
+                    ),
+                    _DrawerItem(
+                      icon: Icons.storefront_rounded,
+                      label: 'Painel da Loja',
+                      visible: funcao == 'gestor' || funcao == 'atendente',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/painel-loja');
                       },
                     ),
                     _DrawerItem(
@@ -48,7 +61,7 @@ class CustomDrawer extends StatelessWidget {
                     _DrawerItem(
                       icon: Icons.receipt_long_rounded,
                       label: 'Meus Pedidos',
-                      visible: true,
+                      visible: logado,
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/pedidos');
@@ -57,7 +70,7 @@ class CustomDrawer extends StatelessWidget {
                     _DrawerItem(
                       icon: Icons.favorite_rounded,
                       label: 'Favoritos',
-                      visible: true,
+                      visible: logado,
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/favoritos');
@@ -66,7 +79,7 @@ class CustomDrawer extends StatelessWidget {
                     _DrawerItem(
                       icon: Icons.location_on_rounded,
                       label: 'Meus Endereços',
-                      visible: true,
+                      visible: logado,
                       onTap: () {
                         Navigator.pop(context);
                         context.push('/enderecos');
@@ -90,38 +103,29 @@ class CustomDrawer extends StatelessWidget {
                         context.push('/pedidos-loja');
                       },
                     ),
-                    _DrawerItem(
-                      icon: Icons.medical_services_rounded,
-                      label: 'Área do Nutricionista',
-                      visible: funcao == 'nutricionista' || funcao == 'admin',
-                      onTap: () {
-                        Navigator.pop(context);
-                        context.push('/area-profissional');
-                      },
-                    ),
-                    _DrawerItem(
-                      icon: Icons.fitness_center_rounded,
-                      label: 'Área do Personal',
-                      visible: funcao == 'personal' || funcao == 'admin',
-                      onTap: () {
-                        Navigator.pop(context);
-                        context.push('/area-profissional');
-                      },
-                    ),
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: context.w(16)),
                       child: const Divider(),
                     ),
                     _DrawerItem(
+                      icon: Icons.login_rounded,
+                      label: 'Entrar ou criar conta',
+                      visible: !logado,
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/login');
+                      },
+                    ),
+                    _DrawerItem(
                       icon: Icons.logout_rounded,
                       label: 'Sair',
-                      visible: true,
+                      visible: logado,
                       color: ThemeColors.error(context),
                       onTap: () async {
                         Navigator.pop(context);
                         final auth = context.read<AuthProvider>();
                         await auth.signOut();
-                        if (context.mounted) context.go('/login');
+                        if (context.mounted) context.go('/');
                       },
                     ),
                   ],

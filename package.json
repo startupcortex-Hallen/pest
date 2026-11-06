@@ -1,0 +1,26 @@
+{
+  "name": "o-pest---loja",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "catalogo": "node o_pest_shop/scripts/gerar-catalogo.mjs",
+    "imagens": "node o_pest_shop/scripts/otimizar-imagens.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/startupcortex-Hallen/pest.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/startupcortex-Hallen/pest/issues"
+  },
+  "homepage": "https://github.com/startupcortex-Hallen/pest#readme"
+}

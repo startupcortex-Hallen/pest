@@ -56,6 +56,39 @@ class PagamentoService {
     };
   }
 
+  /// Enquanto o PagBank não está ativo, o servidor pode liberar um modo de
+  /// simulação (secret SIMULACAO_PAGAMENTO=true). A tela só mostra o botão
+  /// de simulação quando essa flag está ligada.
+  Future<bool> simulacaoDisponivel() async {
+    try {
+      final r = await _invoke('simulacao_disponivel');
+      return r['disponivel'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Confirma um pagamento simulado no servidor (PIX/cartão/boleto), com a
+  /// mesma trilha de pedido, estoque, histórico e comprovante do webhook.
+  Future<Pagamento> simular({
+    required List<int> pedidoIds,
+    required String metodo,
+    int parcelas = 1,
+    Map<String, dynamic>? cartao,
+  }) async {
+    final r = await _invoke('simular', {
+      'pedido_ids': pedidoIds,
+      'metodo': metodo,
+      'parcelas': parcelas,
+      if (cartao != null) 'cartao': cartao,
+    });
+    final pagamento = r['pagamento'];
+    if (pagamento is! Map) {
+      throw StateError('Pagamento simulado sem retorno do servidor.');
+    }
+    return Pagamento.fromJson(Map<String, dynamic>.from(pagamento));
+  }
+
   /// Cria a cobrança única do carrinho (valor recalculado no servidor).
   Future<Pagamento> criar({
     required List<int> pedidoIds,
@@ -81,6 +114,28 @@ class PagamentoService {
   /// Status atualizado da cobrança (fallback do webhook / polling).
   Future<Pagamento> consultar(int pagamentoId) async {
     final r = await _invoke('consultar', {'pagamento_id': pagamentoId});
+    final pagamento = r['pagamento'];
+    if (pagamento is! Map) {
+      throw StateError('Cobrança não encontrada.');
+    }
+    return Pagamento.fromJson(Map<String, dynamic>.from(pagamento));
+  }
+
+  /// Cancela/estorna a cobrança no PagBank e encerra os pedidos vinculados.
+  /// Pago → estorno; pendente → cancelamento. Exige ser o dono ou admin.
+  /// Lê o status já persistido no banco (webhook), sem chamar o PagBank.
+  Future<Pagamento?> statusLocal(int pagamentoId) async {
+    final row = await _client
+        .from('pagamentos')
+        .select('*')
+        .eq('id', pagamentoId)
+        .maybeSingle();
+    if (row == null) return null;
+    return Pagamento.fromJson(Map<String, dynamic>.from(row));
+  }
+
+  Future<Pagamento> cancelar(int pagamentoId) async {
+    final r = await _invoke('cancelar', {'pagamento_id': pagamentoId});
     final pagamento = r['pagamento'];
     if (pagamento is! Map) {
       throw StateError('Cobrança não encontrada.');

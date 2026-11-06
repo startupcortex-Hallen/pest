@@ -6,57 +6,59 @@ class ChatService {
 
   /// Busca uma conversa existente entre o cliente e a unidade, ou cria uma nova
   Future<int> buscarOuCriarConversa(String usuarioId, int unidadeId) async {
-    // Procura conversa existente
     final existente = await _client
         .from('conversas')
         .select('id')
         .eq('usuario_id', usuarioId)
         .eq('unidade_id', unidadeId)
+        .limit(1)
         .maybeSingle();
 
     if (existente != null) {
       return existente['id'] as int;
     }
 
-    // Cria nova conversa
-    final nova = await _client
-        .from('conversas')
-        .insert({
-          'usuario_id': usuarioId,
-          'unidade_id': unidadeId,
-        })
-        .select('id')
-        .single();
-
-    return nova['id'] as int;
+    try {
+      final nova = await _client
+          .from('conversas')
+          .insert({
+            'usuario_id': usuarioId,
+            'unidade_id': unidadeId,
+          })
+          .select('id')
+          .single();
+      return nova['id'] as int;
+    } on PostgrestException catch (e) {
+      // Corrida entre duas aberturas do chat: se o unique index da migration
+      // já criou a conversa, reaproveita em vez de falhar.
+      if (e.code == '23505') {
+        final atual = await _client
+            .from('conversas')
+            .select('id')
+            .eq('usuario_id', usuarioId)
+            .eq('unidade_id', unidadeId)
+            .limit(1)
+            .maybeSingle();
+        if (atual != null) return atual['id'] as int;
+      }
+      rethrow;
+    }
   }
 
-  /// Busca as mensagens de uma conversa (sem join - perfis buscados separadamente)
+  /// Busca as mensagens em uma única consulta, com o perfil do remetente
+  /// embutido (elimina o N+1 de uma consulta por mensagem).
   Future<List<Map<String, dynamic>>> fetchMensagens(int conversaId) async {
     final r = await _client
         .from('mensagens')
-        .select()
+        .select(
+          'id,conversa_id,remetente_id,texto,created_at,'
+          'perfis!mensagens_remetente_id_fkey(nome,avatar_url,funcao)',
+        )
         .eq('conversa_id', conversaId)
-        .order('created_at');
+        .order('created_at')
+        .limit(200);
     if (r is! List) return [];
-    final mensagens = r.cast<Map<String, dynamic>>();
-    // Busca perfil de cada remetente
-    for (final m in mensagens) {
-      await _preencherPerfil(m);
-    }
-    return mensagens;
-  }
-
-  /// Preenche o perfil do remetente na mensagem
-  Future<void> _preencherPerfil(Map<String, dynamic> mensagem) async {
-    try {
-      final perfil = await _client
-          .from('perfis')
-          .select('nome, avatar_url, funcao')
-          .eq('id', mensagem['remetente_id'])
-          .maybeSingle();
-      if (perfil != null) mensagem['perfis'] = perfil;
-    } catch (_) {}
+    return r.cast<Map<String, dynamic>>();
   }
 
   /// Envia uma mensagem
@@ -95,8 +97,8 @@ class ChatService {
   /// Busca o nome e foto da unidade
   Future<Map<String, dynamic>?> fetchUnidadeInfo(int unidadeId) async {
     final r = await _client
-        .from('unidades')
-        .select('nome, foto_url')
+        .from('unidades_publicas')
+        .select('nome,foto_url')
         .eq('id', unidadeId)
         .maybeSingle();
     return r as Map<String, dynamic>?;
@@ -133,7 +135,10 @@ class ChatService {
 
     var query = _client
         .from('conversas')
-        .select('*, unidades(nome)');
+        .select(
+          'id,usuario_id,unidade_id,ultima_mensagem,updated_at,'
+          'unidades(nome),perfis!conversas_usuario_id_fkey(nome,avatar_url)',
+        );
 
     if (funcao != 'admin' && unidadeId != null) {
       query = query.eq('unidade_id', unidadeId);
@@ -141,23 +146,10 @@ class ChatService {
 
     final r = await query
         .not('usuario_id', 'eq', userId.toString())
-        .order('updated_at', ascending: false);
+        .order('updated_at', ascending: false)
+        .limit(50);
 
-    final conversas = (r as List).cast<Map<String, dynamic>>();
-
-    // Busca perfil de cada cliente
-    for (final c in conversas) {
-      try {
-        final perfil = await _client
-            .from('perfis')
-            .select('nome, avatar_url')
-            .eq('id', c['usuario_id'])
-            .maybeSingle();
-        if (perfil != null) c['perfis'] = perfil;
-      } catch (_) {}
-    }
-
-    return conversas;
+    return (r as List).cast<Map<String, dynamic>>();
   }
 
   /// Escuta novas mensagens na central de atendimento

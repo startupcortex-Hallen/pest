@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../models/endereco.dart';
 import '../../../services/endereco_service.dart';
+import '../../../services/frete_service.dart';
 import '../../../providers/auth_provider.dart';
 
 /// CRUD completo dos endereços de entrega do usuário.
@@ -105,7 +106,12 @@ class _EnderecosScreenState extends State<EnderecosScreen> {
     final ufCtrl = TextEditingController(text: endereco?.uf ?? '');
     var principal = endereco?.principal ?? _enderecos.isEmpty;
     var salvando = false;
+    var buscandoCoordenadas = false;
+    var latitude = endereco?.latitude;
+    var longitude = endereco?.longitude;
+    var geocodeFonte = endereco?.geocodeFonte;
     final formKey = GlobalKey<FormState>();
+    final freteService = FreteService();
     final cepMask = MaskTextInputFormatter(
       mask: '#####-###',
       filter: {'#': RegExp(r'[0-9]')},
@@ -230,6 +236,49 @@ class _EnderecosScreenState extends State<EnderecosScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: AppSpacing.sm),
+                    OutlinedButton.icon(
+                      onPressed: buscandoCoordenadas
+                          ? null
+                          : () async {
+                              setDialogState(() => buscandoCoordenadas = true);
+                              final coordenadas = await freteService.geocodificar(
+                                cep: cepCtrl.text,
+                                rua: ruaCtrl.text,
+                                numero: numeroCtrl.text,
+                                bairro: bairroCtrl.text,
+                                cidade: cidadeCtrl.text,
+                                uf: ufCtrl.text,
+                              );
+                              if (coordenadas != null) {
+                                latitude = coordenadas.latitude;
+                                longitude = coordenadas.longitude;
+                                geocodeFonte = coordenadas.fonte;
+                              }
+                              setDialogState(() => buscandoCoordenadas = false);
+                              if (coordenadas == null && ctx.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Não foi possível localizar o endereço. Confira os campos.'),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                              }
+                            },
+                      icon: buscandoCoordenadas
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.my_location_rounded, size: 18),
+                      label: Text(
+                        latitude != null && longitude != null
+                            ? 'Localização confirmada (${latitude!.toStringAsFixed(4)}, ${longitude!.toStringAsFixed(4)})'
+                            : 'Localizar endereço para entrega',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
                     SwitchListTile(
                       title: const Text('Endereço principal'),
                       value: principal,
@@ -266,6 +315,9 @@ class _EnderecosScreenState extends State<EnderecosScreen> {
                             cidade: cidadeCtrl.text.trim(),
                             uf: ufCtrl.text.trim().toUpperCase(),
                             principal: principal,
+                            latitude: latitude,
+                            longitude: longitude,
+                            geocodeFonte: geocodeFonte,
                           );
                         } else {
                           await _service.atualizar(
@@ -280,6 +332,9 @@ class _EnderecosScreenState extends State<EnderecosScreen> {
                             cidade: cidadeCtrl.text.trim(),
                             uf: ufCtrl.text.trim().toUpperCase(),
                             principal: principal,
+                            latitude: latitude,
+                            longitude: longitude,
+                            geocodeFonte: geocodeFonte,
                           );
                         }
                         if (ctx.mounted) Navigator.pop(ctx);

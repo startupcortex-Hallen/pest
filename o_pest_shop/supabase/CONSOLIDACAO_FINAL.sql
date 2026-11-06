@@ -16,6 +16,13 @@
 -- COMO USAR: Supabase > SQL Editor > cole o arquivo inteiro > RUN.
 -- É IDEMPOTENTE: pode rodar de novo sem duplicar nada.
 -- Ao final, siga o PASSO 2 (promover o primeiro admin) que está no fim.
+--
+-- IMPORTANTE: depois deste script rode, nesta ordem:
+--   FASE2_ENDERECOS_FRETE.sql
+--   migrations/20261017120000_pagamentos_gateway.sql
+--   migrations/20261018130000_revogar_rpc_publicas.sql
+--   migrations/20261019120000_pagamentos_blindagem.sql
+-- O último script corrige o checkout/estoque e as permissões das RPCs.
 -- ═══════════════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════════════
@@ -596,8 +603,13 @@ begin
 end $$;
 
 drop trigger if exists trg_pedido_status on public.pedidos;
-create trigger trg_pedido_status
-  before insert or update on public.pedidos
+drop trigger if exists trg_pedido_status_insert on public.pedidos;
+create trigger trg_pedido_status_insert
+  after insert on public.pedidos
+  for each row execute function public.fn_pedido_status();
+drop trigger if exists trg_pedido_status_update on public.pedidos;
+create trigger trg_pedido_status_update
+  before update on public.pedidos
   for each row execute function public.fn_pedido_status();
 
 -- ═══════════════════════════════════════════════════════════════════════
@@ -684,6 +696,14 @@ begin
 
   if p_status = v_pedido.status then return; end if;
 
+  if p_status = 'cancelado' and exists (
+    select 1 from public.pagamentos p
+     where p.id = v_pedido.pagamento_id
+       and p.status in ('pago','pendente','em_analise')
+  ) then
+    raise exception 'Pedido com cobrança ativa: use o cancelamento/estorno pelo gateway';
+  end if;
+
   update public.pedidos
      set status = p_status,
          recebedor_nome = coalesce(nullif(trim(p_recebedor), ''), recebedor_nome)
@@ -732,6 +752,16 @@ security definer
 set search_path = public
 as $$
 begin
+  if exists (
+    select 1
+      from public.pedidos o
+      join public.pagamentos p on p.id = o.pagamento_id
+     where o.id = p_pedido_id
+       and p.status in ('pago','pendente','em_analise')
+  ) then
+    raise exception 'Pedido com cobrança ativa: use o cancelamento/estorno pelo gateway';
+  end if;
+
   update public.pedidos
      set status = 'cancelado'
    where id = p_pedido_id
@@ -770,6 +800,7 @@ declare
   v_estoque int;
   v_preco numeric;
   v_produto_nome text;
+  v_cores text[];
   v_unidade_nome text;
   v_pix text;
   v_subtotal_unidade numeric;
@@ -799,18 +830,30 @@ begin
       raise exception 'Quantidade inválida para o produto';
     end if;
 
-    select p.estoque, p.nome,
+    select p.estoque, p.nome, p.cores,
            case when p.em_promocao and p.preco_promocional is not null then p.preco_promocional else p.preco end
-      into v_estoque, v_produto_nome, v_preco
+      into v_estoque, v_produto_nome, v_cores, v_preco
       from public.produtos p where p.id = v_produto_id
       for update;
 
     if not found then
-      raise exception 'Produto não encontrado';
+      raise exception 'Produto nA�o encontrado';
     end if;
     if v_estoque < v_qtd then
       raise exception '"%" com estoque insuficiente (restam %, pedido: %)',
         v_produto_nome, v_estoque, v_qtd;
+    end if;
+
+    if coalesce(array_length(v_cores, 1), 0) > 0 then
+      if nullif(trim(coalesce(v_el->>'cor', '')), '') is null then
+        raise exception 'Selecione a cor do produto "%".', v_produto_nome;
+      end if;
+      if not exists (
+        select 1 from unnest(v_cores) as c
+         where lower(trim(c)) = lower(trim(v_el->>'cor'))
+      ) then
+        raise exception 'Cor "%" invA�lida para o produto "%".', v_el->>'cor', v_produto_nome;
+      end if;
     end if;
 
     v_subtotal_geral := v_subtotal_geral + (coalesce(v_preco, 0) * v_qtd);
@@ -1019,9 +1062,11 @@ begin
   return v_estoque - quantidade;
 end $$;
 
--- 8.9) Grants: RPCs apenas para usuários autenticados
-revoke all on function public.confirmar_pagamento(bigint, text) from public, anon;
-grant execute on function public.confirmar_pagamento(bigint, text) to authenticated;
+-- 8.9) Grants
+-- Pagamento/estoque: SOMENTE server-side (webhook/Edge Function).
+revoke all on function public.confirmar_pagamento(bigint, text)
+  from public, anon, authenticated;
+grant execute on function public.confirmar_pagamento(bigint, text) to service_role;
 
 revoke all on function public.alterar_status_pedido(bigint, text, text) from public, anon;
 grant execute on function public.alterar_status_pedido(bigint, text, text) to authenticated;
@@ -1035,14 +1080,16 @@ grant execute on function public.cancelar_pedido(bigint) to authenticated;
 revoke all on function public.finalizar_checkout(uuid, jsonb, numeric, bigint, text, text, text) from public, anon;
 grant execute on function public.finalizar_checkout(uuid, jsonb, numeric, bigint, text, text, text) to authenticated;
 
-revoke all on function public.processar_pagamento_cartao(bigint, bigint, int) from public, anon;
-grant execute on function public.processar_pagamento_cartao(bigint, bigint, int) to authenticated;
+revoke all on function public.processar_pagamento_cartao(bigint, bigint, int)
+  from public, anon, authenticated;
+grant execute on function public.processar_pagamento_cartao(bigint, bigint, int) to service_role;
 
 revoke all on function public.cancelar_pendentes_expirados(int) from public, anon;
 grant execute on function public.cancelar_pendentes_expirados(int) to authenticated;
 
-revoke all on function public.decrementar_estoque(bigint, int) from public, anon;
-grant execute on function public.decrementar_estoque(bigint, int) to authenticated;
+revoke all on function public.decrementar_estoque(bigint, int)
+  from public, anon, authenticated;
+grant execute on function public.decrementar_estoque(bigint, int) to service_role;
 
 -- service_role (webhooks/edge functions) também pode executar as RPCs
 do $$
@@ -1209,7 +1256,7 @@ begin
         using (id = auth.uid() or public.funcao_usuario() = 'admin')$sql$);
   perform public._cons_ensure_policy('perfis', 'perfis_delete',
     $sql$create policy "perfis_delete" on public.perfis for delete to authenticated
-        using (id = auth.uid() or public.funcao_usuario() = 'admin')$sql$);
+        using (false)$sql$);
   perform public._cons_ensure_policy('perfis', 'perfis_insert',
     $sql$create policy "perfis_insert" on public.perfis for insert to authenticated with check (id = auth.uid())$sql$);
 

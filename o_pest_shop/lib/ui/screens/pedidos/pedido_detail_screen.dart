@@ -1,8 +1,10 @@
-﻿import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/helpers/abrir_mapa.dart';
 import '../../../core/helpers/pedido_status.dart';
 import '../../../core/helpers/theme_colors.dart';
@@ -11,6 +13,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../services/checkout_service.dart';
+import '../../../services/pagamento_service.dart';
 import '../../widgets/comprovante_pagamento.dart';
 import 'pagamento_screen.dart';
 
@@ -38,6 +41,7 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     super.initState();
     _pedido = widget.pedido;
     _carregarHistorico();
+    _recarregarPedido();
     _inscreverRealtime();
   }
 
@@ -88,7 +92,9 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     try {
       final atualizado = await Supabase.instance.client
           .from('pedidos')
-          .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)')
+          .select(
+            '*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)',
+          )
           .eq('id', _pedido['id'])
           .eq('user_id', userId)
           .maybeSingle();
@@ -109,7 +115,8 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
         final mapa = <String, String>{};
         for (final h in r) {
           final hMap = (h as Map).cast<String, dynamic>();
-          mapa[hMap['status'] as String? ?? ''] = hMap['criado_em'] as String? ?? '';
+          mapa[hMap['status'] as String? ?? ''] =
+              hMap['criado_em'] as String? ?? '';
         }
         setState(() => _historico = mapa);
       }
@@ -119,20 +126,32 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
   List<Map<String, dynamic>> get _itens =>
       ((_pedido['pedido_itens'] as List?) ?? []).cast<Map<String, dynamic>>();
 
-  Map<String, dynamic>? get _unidade =>
-      _pedido['unidades'] is Map ? (_pedido['unidades'] as Map).cast<String, dynamic>() : null;
+  Map<String, dynamic>? get _unidade => _pedido['unidades'] is Map
+      ? (_pedido['unidades'] as Map).cast<String, dynamic>()
+      : null;
 
   String? get _status => _pedido['status'] as String?;
 
   double get _subtotal => _itens.fold<double>(
-      0, (s, i) => s + ((i['preco_unitario'] as num?)?.toDouble() ?? 0) * (i['quantidade'] as int? ?? 1));
+    0,
+    (s, i) =>
+        s +
+        ((i['preco_unitario'] as num?)?.toDouble() ?? 0) *
+            (i['quantidade'] as int? ?? 1),
+  );
 
   double get _total => (_pedido['total'] as num?)?.toDouble() ?? 0;
 
   String get _tipoEntrega => _pedido['tipo_entrega'] as String? ?? 'retirada';
 
-  Map<String, dynamic>? get _pagamentoGravado =>
-      _pedido['pagamentos'] is Map ? (_pedido['pagamentos'] as Map).cast<String, dynamic>() : null;
+  Map<String, dynamic>? get _pagamentoGravado {
+    final raw = _pedido['pagamentos'];
+    if (raw is Map) return raw.cast<String, dynamic>();
+    if (raw is List && raw.isNotEmpty && raw.first is Map) {
+      return (raw.first as Map).cast<String, dynamic>();
+    }
+    return null;
+  }
 
   String get _rotuloPagamento {
     final p = _pagamentoGravado;
@@ -146,13 +165,26 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
           return 'Cartão de débito';
         case 'boleto':
           return 'Boleto';
+        case 'manual':
+          return 'Pagamento manual';
         default:
           return p['metodo'] as String? ?? '—';
       }
     }
-    final legado = _pedido['pagamento'] as String?;
-    if (legado == null) return '—';
-    return legado == 'cartao' ? 'Cartão de crédito' : 'PIX';
+    final legado = (_pedido['pagamento'] as String?)?.trim() ?? '';
+    if (legado.isEmpty) return '—';
+    final lower = legado.toLowerCase();
+    if (lower.contains('crédito') ||
+        lower.contains('credito') ||
+        lower == 'cartao') {
+      return 'Cartão de crédito';
+    }
+    if (lower.contains('débito') || lower.contains('debito')) {
+      return 'Cartão de débito';
+    }
+    if (lower.contains('boleto')) return 'Boleto';
+    if (lower.contains('pix')) return 'PIX';
+    return legado;
   }
 
   Future<void> _atualizarLocal(Map<String, dynamic> novo) async {
@@ -183,25 +215,51 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     if (userId == null) return;
     final atualizado = await Supabase.instance.client
         .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)')
+        .select(
+          '*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min), pagamentos(*)',
+        )
         .eq('id', p['id'])
         .eq('user_id', userId)
         .maybeSingle();
-    if (atualizado != null && mounted) _atualizarLocal((atualizado as Map).cast<String, dynamic>());
+    if (atualizado != null && mounted)
+      _atualizarLocal((atualizado as Map).cast<String, dynamic>());
     _carregarHistorico();
   }
 
   Future<void> _cancelar() async {
+    final pagamento = _pagamentoGravado;
+    final pagamentoId = (pagamento?['id'] as num?)?.toInt();
+    final statusPagamento = pagamento?['status'] as String?;
+    final precisaGateway =
+        pagamentoId != null &&
+        (statusPagamento == 'pago' ||
+            statusPagamento == 'pendente' ||
+            statusPagamento == 'em_analise');
+    final estorno = statusPagamento == 'pago';
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar pedido'),
-        content: const Text('Tem certeza que deseja cancelar este pedido?'),
+        title: Text(estorno ? 'Cancelar e estornar' : 'Cancelar pedido'),
+        content: Text(
+          estorno
+              ? 'O valor pago será estornado no gateway e o pedido será cancelado. '
+                    'Se este pagamento cobre mais de um pedido, todos serão cancelados. Deseja continuar?'
+              : precisaGateway
+              ? 'A cobrança pendente será cancelada no gateway e o pedido será encerrado. Deseja continuar?'
+              : 'Tem certeza que deseja cancelar este pedido?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Voltar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Voltar'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Cancelar pedido', style: TextStyle(color: ThemeColors.error(ctx))),
+            child: Text(
+              estorno ? 'Estornar e cancelar' : 'Cancelar pedido',
+              style: TextStyle(color: ThemeColors.error(ctx)),
+            ),
           ),
         ],
       ),
@@ -209,18 +267,41 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     if (confirm != true) return;
     setState(() => _processando = true);
     try {
-      // Cancelamento via RPC — a máquina de estados do banco valida a
-      // permissão e devolve o estoque de forma idempotente (1x).
-      await Supabase.instance.client.rpc('cancelar_pedido', params: {
-        'p_pedido_id': _pedido['id'],
-      });
-      final novo = Map<String, dynamic>.from(_pedido)..['status'] = 'cancelado';
-      if (mounted) _atualizarLocal(novo);
+      if (precisaGateway) {
+        // Cancela/estorna no PagBank ANTES de encerrar o pedido. Se o gateway
+        // falhar, nada é cancelado localmente (evita dinheiro preso).
+        await PagamentoService().cancelar(pagamentoId);
+        await _recarregarPedido();
+      } else {
+        // Sem cobrança ativa: RPC normal devolve estoque/cupom pelo trigger.
+        await Supabase.instance.client.rpc(
+          'cancelar_pedido',
+          params: {'p_pedido_id': _pedido['id']},
+        );
+        final novo = Map<String, dynamic>.from(_pedido)
+          ..['status'] = 'cancelado';
+        if (mounted) _atualizarLocal(novo);
+      }
       _carregarHistorico();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              estorno
+                  ? 'Pedido cancelado e estorno solicitado!'
+                  : 'Pedido cancelado!',
+            ),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao cancelar: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text(e is StateError ? e.message : 'Erro ao cancelar: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     } finally {
@@ -231,9 +312,11 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
   Future<void> _comprarNovamente() async {
     final cart = context.read<CartProvider>();
     for (final i in _itens) {
-      await cart.adicionar(i['produto_id'] as int,
-          quantidade: i['quantidade'] as int? ?? 1,
-          cor: i['cor'] as String?);
+      await cart.adicionar(
+        i['produto_id'] as int,
+        quantidade: i['quantidade'] as int? ?? 1,
+        cor: i['cor'] as String?,
+      );
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -252,15 +335,24 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     await abrirMapa(endereco);
   }
 
+  Future<void> _abrirRastreio() async {
+    final url = _pedido['url_rastreio'] as String? ?? '';
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = _status ?? 'pendente';
     final cor = corStatusPedido(status);
-    final idx = indiceEtapa(status);
+    final etapas = etapasTimelinePara(_pedido);
+    final idx = indiceEtapaEm(status, etapas);
     final unidade = _unidade;
     final tipo = _tipoEntrega;
     final entrega = tipo == 'entrega';
-    final podeCancelar = status == 'pendente' || status == 'pago';
+    final podeCancelar =
+        status == 'pendente' || status == 'pago' || status == 'em_preparo';
     final podePagar = status == 'pendente';
     final enderecoEntrega = _pedido['endereco_entrega'] as String? ?? '';
 
@@ -278,8 +370,10 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
             }
           },
         ),
-        title: Text('Pedido #${_pedido['id']}',
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          'Pedido #${_pedido['id']}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         elevation: 0,
       ),
       body: ListView(
@@ -294,28 +388,55 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
             ),
             child: Row(
               children: [
-                Icon(entrega ? Icons.delivery_dining_rounded : Icons.storefront_rounded, color: cor),
+                Icon(
+                  entrega
+                      ? Icons.delivery_dining_rounded
+                      : Icons.storefront_rounded,
+                  color: cor,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(rotuloStatusPedido(status),
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: cor)),
+                      Text(
+                        rotuloStatusPedido(status),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: cor,
+                        ),
+                      ),
                       if (unidade != null)
                         Text(
-                          previsaoTexto(unidade, tipo),
-                          style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context)),
+                          previsaoTexto(
+                            unidade,
+                            tipo,
+                            previsaoEntregaMin:
+                                (_pedido['previsao_entrega_min'] as num?)
+                                    ?.toInt(),
+                          ),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ThemeColors.secondaryText(context),
+                          ),
                         ),
-                      if (status == 'entregue' && _pedido['recebedor_nome'] != null)
+                      if (status == 'entregue' &&
+                          _pedido['recebedor_nome'] != null)
                         Text(
                           'Recebido por: ${_pedido['recebedor_nome']}',
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF00A650), fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF00A650),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                     ],
                   ),
                 ),
-                if (entrega && status == 'saiu_para_entrega' && enderecoEntrega.isNotEmpty)
+                if (entrega &&
+                    status == 'saiu_para_entrega' &&
+                    enderecoEntrega.isNotEmpty)
                   IconButton(
                     icon: Icon(Icons.map_rounded, color: cor),
                     onPressed: _abrirMapa,
@@ -333,23 +454,31 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
-              children: List.generate(etapasTimeline.length, (i) {
+              children: List.generate(etapas.length, (i) {
                 final concluido = idx >= i;
                 final atual = idx == i;
-                final icone = concluido ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded;
+                final icone = concluido
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded;
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Column(
                       children: [
-                        Icon(icone,
-                            size: 22,
-                            color: concluido ? corStatusPedido(etapasTimeline[i]) : ThemeColors.hint(context)),
-                        if (i < etapasTimeline.length - 1)
+                        Icon(
+                          icone,
+                          size: 22,
+                          color: concluido
+                              ? corStatusPedido(etapas[i])
+                              : ThemeColors.hint(context),
+                        ),
+                        if (i < etapas.length - 1)
                           Container(
                             width: 2,
                             height: 26,
-                            color: idx > i ? corStatusPedido(etapasTimeline[i]) : ThemeColors.divider(context),
+                            color: idx > i
+                                ? corStatusPedido(etapas[i])
+                                : ThemeColors.divider(context),
                           ),
                       ],
                     ),
@@ -361,17 +490,26 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              rotuloStatusPedido(etapasTimeline[i]),
+                              rotuloStatusPedido(etapas[i]),
                               style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: atual ? FontWeight.w700 : FontWeight.w500,
-                                color: concluido ? ThemeColors.primaryText(context) : ThemeColors.hint(context),
+                                fontWeight: atual
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: concluido
+                                    ? ThemeColors.primaryText(context)
+                                    : ThemeColors.hint(context),
                               ),
                             ),
                             // Data/hora REAL de cada etapa (pedido_historico)
-                            if (concluido && _historico[etapasTimeline[i]] != null)
-                              Text(formatarDataHora(_historico[etapasTimeline[i]]),
-                                  style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context))),
+                            if (concluido && _historico[etapas[i]] != null)
+                              Text(
+                                formatarDataHora(_historico[etapas[i]]),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: ThemeColors.secondaryText(context),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -393,37 +531,74 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(entrega ? 'Entrega' : 'Retirada na unidade',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                Text(
+                  entrega ? 'Entrega' : 'Retirada na unidade',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 if (entrega && enderecoEntrega.isNotEmpty) ...[
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.location_on_rounded, size: 18, color: Color(0xFFE50914)),
+                      const Icon(
+                        Icons.location_on_rounded,
+                        size: 18,
+                        color: Color(0xFFE50914),
+                      ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(enderecoEntrega, style: const TextStyle(fontSize: 13))),
+                      Expanded(
+                        child: Text(
+                          enderecoEntrega,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   GestureDetector(
                     onTap: _abrirMapa,
-                    child: const Text('Abrir no mapa',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFFE50914))),
+                    child: const Text(
+                      'Abrir no mapa',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFE50914),
+                      ),
+                    ),
                   ),
                 ] else if (unidade != null) ...[
                   Row(
                     children: [
-                      const Icon(Icons.store_rounded, size: 18, color: Color(0xFFE50914)),
+                      const Icon(
+                        Icons.store_rounded,
+                        size: 18,
+                        color: Color(0xFFE50914),
+                      ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(unidade['nome'] as String? ?? 'Loja', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                      Expanded(
+                        child: Text(
+                          unidade['nome'] as String? ?? 'Loja',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   if (unidade['endereco'] != null)
                     Padding(
                       padding: const EdgeInsets.only(left: 26, top: 4),
-                      child: Text('${unidade['endereco']}${unidade['bairro'] != null ? ' - ${unidade['bairro']}' : ''}',
-                          style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context))),
+                      child: Text(
+                        '${unidade['endereco']}${unidade['bairro'] != null ? ' - ${unidade['bairro']}' : ''}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ThemeColors.secondaryText(context),
+                        ),
+                      ),
                     ),
                 ],
               ],
@@ -432,7 +607,10 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
           const SizedBox(height: AppSpacing.lg),
 
           // Itens
-          Text('Itens (${_itens.length})', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          Text(
+            'Itens (${_itens.length})',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: AppSpacing.sm),
           Container(
             padding: const EdgeInsets.all(AppSpacing.md),
@@ -442,7 +620,9 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
             ),
             child: Column(
               children: _itens.map((i) {
-                final prod = i['produtos'] is Map ? (i['produtos'] as Map) : null;
+                final prod = i['produtos'] is Map
+                    ? (i['produtos'] as Map)
+                    : null;
                 final rawImg = prod?['url_imagem'];
                 String? img;
                 if (rawImg is List && rawImg.isNotEmpty) {
@@ -465,12 +645,23 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                               ? CachedNetworkImage(
                                   imageUrl: img,
                                   fit: BoxFit.cover,
-                                  errorWidget: (_, __, ___) =>
-                                      Container(color: ThemeColors.surfaceVariant(context), child: Icon(Icons.image_outlined, size: 20, color: ThemeColors.hint(context))),
+                                  errorWidget: (_, __, ___) => Container(
+                                    color: ThemeColors.surfaceVariant(context),
+                                    child: Icon(
+                                      Icons.image_outlined,
+                                      size: 20,
+                                      color: ThemeColors.hint(context),
+                                    ),
+                                  ),
                                 )
                               : Container(
                                   color: ThemeColors.surfaceVariant(context),
-                                  child: Icon(Icons.image_outlined, size: 20, color: ThemeColors.hint(context))),
+                                  child: Icon(
+                                    Icons.image_outlined,
+                                    size: 20,
+                                    color: ThemeColors.hint(context),
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -478,20 +669,42 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(prod?['nome'] as String? ?? 'Produto',
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
-                            if (i['cor'] != null && (i['cor'] as String).isNotEmpty)
-                              Text('Cor: ${i['cor']}',
-                                  style: TextStyle(fontSize: 11, color: ThemeColors.primary(context), fontWeight: FontWeight.w600)),
-                            Text('$qtd x R\$ ${preco.toStringAsFixed(2)}',
-                                style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context))),
+                            Text(
+                              prod?['nome'] as String? ?? 'Produto',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (i['cor'] != null &&
+                                (i['cor'] as String).isNotEmpty)
+                              Text(
+                                'Cor: ${i['cor']}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: ThemeColors.primary(context),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            Text(
+                              '$qtd x R\$ ${preco.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: ThemeColors.secondaryText(context),
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      Text('R\$ ${(preco * qtd).toStringAsFixed(2)}',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                      Text(
+                        'R\$ ${(preco * qtd).toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -511,10 +724,41 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
               children: [
                 _linha('Subtotal', 'R\$ ${_subtotal.toStringAsFixed(2)}'),
                 if (_subtotal > _total)
-                  _linha('Desconto', '-R\$ ${(_subtotal - _total).toStringAsFixed(2)}', cor: const Color(0xFF00A650)),
-                _linha('Entrega', entrega ? 'Entrega' : 'Retirada na unidade'),
+                  _linha(
+                    'Desconto',
+                    '-R\$ ${(_subtotal - _total).toStringAsFixed(2)}',
+                    cor: const Color(0xFF00A650),
+                  ),
+                _linha(
+                  'Entrega',
+                  !entrega
+                      ? 'Retirada na unidade'
+                      : ((_pedido['taxa_entrega'] as num?)?.toDouble() ?? 0) > 0
+                      ? 'R\$ ${((_pedido['taxa_entrega'] as num).toDouble()).toStringAsFixed(2)}'
+                      : 'Grátis',
+                ),
+                if (entrega && _pedido['distancia_km'] != null)
+                  _linha(
+                    'Distância',
+                    '${((_pedido['distancia_km'] as num).toDouble()).toStringAsFixed(1).replaceAll('.', ',')} km',
+                  ),
+                if (entrega && _pedido['previsao_entrega_min'] != null)
+                  _linha(
+                    'Previsão',
+                    _previsaoCurta(
+                      (_pedido['previsao_entrega_min'] as num).toInt(),
+                    ),
+                  ),
+                if ((_pedido['frete_servico'] as String?)?.isNotEmpty == true)
+                  _linha('Serviço', _pedido['frete_servico'] as String),
+                if ((_pedido['etiqueta_status'] as String?)?.isNotEmpty == true)
+                  _linha(
+                    'Etiqueta',
+                    rotuloEtiqueta(_pedido['etiqueta_status'] as String),
+                  ),
                 _linha('Pagamento', _rotuloPagamento),
-                if (_pagamentoGravado == null && _pedido['transacao_id'] != null)
+                if (_pagamentoGravado == null &&
+                    _pedido['transacao_id'] != null)
                   _linha('Transação', '#${_pedido['transacao_id']}'),
                 const Divider(height: 20),
                 _linha('Total', 'R\$ ${_total.toStringAsFixed(2)}', bold: true),
@@ -523,10 +767,80 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
 
+          if ((_pedido['codigo_rastreio'] as String?)?.isNotEmpty == true ||
+              (_pedido['url_rastreio'] as String?)?.isNotEmpty == true) ...[
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: ThemeColors.surface(context),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.local_shipping_rounded,
+                    color: Color(0xFF0084FF),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Rastreio da entrega',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if ((_pedido['codigo_rastreio'] as String?)
+                                ?.isNotEmpty ==
+                            true)
+                          Text(
+                            _pedido['codigo_rastreio'] as String,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: ThemeColors.secondaryText(context),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if ((_pedido['codigo_rastreio'] as String?)?.isNotEmpty ==
+                      true)
+                    IconButton(
+                      tooltip: 'Copiar código',
+                      onPressed: () {
+                        Clipboard.setData(
+                          ClipboardData(
+                            text: _pedido['codigo_rastreio'] as String,
+                          ),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Código de rastreio copiado.'),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                    ),
+                  if ((_pedido['url_rastreio'] as String?)?.isNotEmpty == true)
+                    TextButton(
+                      onPressed: _abrirRastreio,
+                      child: const Text('Acompanhar'),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+
           // Comprovante de pagamento (PagBank) — padrão grandes lojas
           if (_pagamentoGravado != null) ...[
-            const Text('Comprovante de pagamento',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const Text(
+              'Comprovante de pagamento',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: AppSpacing.sm),
             ComprovantePagamento(dados: _pagamentoGravado!),
             const SizedBox(height: AppSpacing.lg),
@@ -549,17 +863,30 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                       color: const Color(0xFFE50914).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.store_rounded, color: Color(0xFFE50914)),
+                    child: const Icon(
+                      Icons.store_rounded,
+                      color: Color(0xFFE50914),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(unidade['nome'] as String? ?? 'Loja',
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                        Text('Vendido e entregue pela loja',
-                            style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context))),
+                        Text(
+                          unidade['nome'] as String? ?? 'Loja',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'Vendido e entregue pela loja',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: ThemeColors.secondaryText(context),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -567,9 +894,14 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                     onPressed: () => context.push(
                       '/chat/${_pedido['unidade_id']}/${Uri.encodeComponent(unidade['nome'] as String? ?? 'Loja')}',
                     ),
-                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                    icon: const Icon(
+                      Icons.chat_bubble_outline_rounded,
+                      size: 16,
+                    ),
                     label: const Text('Falar com a loja'),
-                    style: TextButton.styleFrom(foregroundColor: const Color(0xFFE50914)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFE50914),
+                    ),
                   ),
                 ],
               ),
@@ -583,11 +915,16 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
               child: ElevatedButton.icon(
                 onPressed: _processando ? null : _pagarAgora,
                 icon: const Icon(Icons.payments_rounded, size: 20),
-                label: const Text('Pagar agora', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                label: const Text(
+                  'Pagar agora',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE50914),
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
@@ -600,9 +937,14 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: ThemeColors.error(context),
                   side: BorderSide(color: ThemeColors.error(context)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: const Text('Cancelar pedido', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Cancelar pedido',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -613,7 +955,9 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
               onPressed: _comprarNovamente,
               icon: const Icon(Icons.replay_rounded, size: 18),
               label: const Text('Comprar novamente'),
-              style: TextButton.styleFrom(foregroundColor: const Color(0xFFE50914)),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFE50914),
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -622,22 +966,44 @@ class _PedidoDetailScreenState extends State<PedidoDetailScreen> {
     );
   }
 
+  String _previsaoCurta(int minutos) {
+    if (minutos >= 1440) {
+      final dias = minutos ~/ 1440;
+      final horas = (minutos % 1440) ~/ 60;
+      return horas > 0 ? '$dias dia(s) e ${horas}h' : '$dias dia(s)';
+    }
+    if (minutos >= 60) {
+      final horas = minutos ~/ 60;
+      final resto = minutos % 60;
+      return resto > 0
+          ? '${horas}h${resto.toString().padLeft(2, '0')}'
+          : '${horas}h';
+    }
+    return '$minutos min';
+  }
+
   Widget _linha(String label, String valor, {Color? cor, bool bold = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: cor ?? ThemeColors.secondaryText(context),
-                  fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
-          Text(valor,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: cor ?? ThemeColors.primaryText(context),
-                  fontWeight: bold ? FontWeight.w700 : FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: cor ?? ThemeColors.secondaryText(context),
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 13,
+              color: cor ?? ThemeColors.primaryText(context),
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );

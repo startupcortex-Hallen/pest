@@ -4,10 +4,24 @@ import '../../../core/theme/app_spacing.dart';
 
 String mapErroAdmin(dynamic e) {
   final msg = e.toString().toLowerCase();
-  if (msg.contains('duplicate key') || msg.contains('unique constraint')) return 'Registro duplicado.';
-  if (msg.contains('foreign key')) return 'Registro vinculado a outros dados. Não é possível excluir.';
-  if (msg.contains('violates row-level security')) return 'Sem permissão para esta operação.';
-  if (msg.contains('23505')) return 'Já existe um registro com este identificador.';
+  if (msg.contains('duplicate key') || msg.contains('unique constraint'))
+    return 'Registro duplicado.';
+  if (msg.contains('foreign key'))
+    return 'Registro vinculado a outros dados. Não é possível excluir.';
+  if (msg.contains('violates row-level security'))
+    return 'Sem permissão para esta operação.';
+  if (msg.contains('23505'))
+    return 'Já existe um registro com este identificador.';
+  if (msg.contains('possui pedidos'))
+    return 'Este usuário possui pedidos e não pode ser excluído.';
+  if (msg.contains('último admin') || msg.contains('ultimo admin'))
+    return 'Não é possível excluir o último admin.';
+  if (msg.contains('própria conta') || msg.contains('propria conta'))
+    return 'Você não pode excluir a própria conta.';
+  if (msg.contains('sem permissão') || msg.contains('sem permissao'))
+    return 'Sem permissão para esta operação.';
+  if (msg.contains('não autenticado') || msg.contains('nao autenticado'))
+    return 'Sessão expirada. Entre novamente.';
   return 'Erro ao executar operação. Tente novamente.';
 }
 
@@ -16,18 +30,27 @@ String formatarMoeda(dynamic valor) {
   return 'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 }
 
-String capitalizar(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+String capitalizar(String s) =>
+    s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
 
 String nomeDiaSemana(String? d) {
   switch (d) {
-    case 'seg': return 'Segunda-feira';
-    case 'ter': return 'Terça-feira';
-    case 'qua': return 'Quarta-feira';
-    case 'qui': return 'Quinta-feira';
-    case 'sex': return 'Sexta-feira';
-    case 'sab': return 'Sábado';
-    case 'dom': return 'Domingo';
-    default: return d ?? '';
+    case 'seg':
+      return 'Segunda-feira';
+    case 'ter':
+      return 'Terça-feira';
+    case 'qua':
+      return 'Quarta-feira';
+    case 'qui':
+      return 'Quinta-feira';
+    case 'sex':
+      return 'Sexta-feira';
+    case 'sab':
+      return 'Sábado';
+    case 'dom':
+      return 'Domingo';
+    default:
+      return d ?? '';
   }
 }
 
@@ -38,22 +61,39 @@ String formatarData(String? iso) {
   return '${p(dt.day)}/${p(dt.month)}/${dt.year} ${p(dt.hour)}:${p(dt.minute)}';
 }
 
-Future<bool> confirmarExclusao(BuildContext context, {required String titulo, String? mensagem}) async {
+Future<bool> confirmarExclusao(
+  BuildContext context, {
+  required String titulo,
+  String? mensagem,
+}) async {
   final confirm = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(titulo),
       content: Text(mensagem ?? 'Tem certeza?'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Excluir', style: TextStyle(color: ThemeColors.error(ctx)))),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(
+            'Excluir',
+            style: TextStyle(color: ThemeColors.error(ctx)),
+          ),
+        ),
       ],
     ),
   );
   return confirm == true;
 }
 
-InputDecoration adminInputDec(BuildContext context, String label, {String? hint}) {
+InputDecoration adminInputDec(
+  BuildContext context,
+  String label, {
+  String? hint,
+}) {
   return InputDecoration(
     labelText: label,
     hintText: hint,
@@ -82,12 +122,17 @@ class AdminCampoSelecao extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 12),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: 12,
+        ),
         decoration: BoxDecoration(
           color: ThemeColors.surface(context),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: erro ? ThemeColors.error(context) : ThemeColors.outline(context),
+            color: erro
+                ? ThemeColors.error(context)
+                : ThemeColors.outline(context),
             width: erro ? 1.5 : 1,
           ),
         ),
@@ -97,11 +142,21 @@ class AdminCampoSelecao extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: TextStyle(fontSize: 12, color: ThemeColors.secondaryText(context))),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: ThemeColors.secondaryText(context),
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     valor,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: ThemeColors.primaryText(context)),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: ThemeColors.primaryText(context),
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),

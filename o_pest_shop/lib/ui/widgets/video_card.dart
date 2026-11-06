@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import '../../core/helpers/scale_helper.dart';
@@ -54,9 +55,6 @@ class _VideoCardState extends State<VideoCard> {
 
   Color _badgeColor() {
     switch (widget.categoria.toLowerCase()) {
-      case 'vaga':
-      case 'emprego':
-        return AppColors.success;
       case 'notícia':
       case 'noticia':
       case 'novidade':
@@ -105,12 +103,21 @@ class _VideoCardState extends State<VideoCard> {
                           child: SizedBox(
                             width: context.w(18).clamp(14.0, 24.0) * 2,
                             height: context.w(18).clamp(14.0, 24.0) * 2,
-                            child: Image.network(widget.autorImagem!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Icon(
-                                    Icons.person_rounded,
-                                    color: AppColors.hint,
-                                    size: context.sp(18))),
+                            child: CachedNetworkImage(
+                              imageUrl: widget.autorImagem!,
+                              fit: BoxFit.cover,
+                              memCacheWidth: 96,
+                              placeholder: (_, __) => Icon(
+                                Icons.person_rounded,
+                                color: AppColors.hint,
+                                size: context.sp(18),
+                              ),
+                              errorWidget: (_, __, ___) => Icon(
+                                Icons.person_rounded,
+                                color: AppColors.hint,
+                                size: context.sp(18),
+                              ),
+                            ),
                           ),
                         )
                       : Icon(Icons.person_rounded,
@@ -155,10 +162,16 @@ class _VideoCardState extends State<VideoCard> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.network(
-                        _thumbUrl!,
+                      CachedNetworkImage(
+                        imageUrl: _thumbUrl!,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        memCacheWidth: 800,
+                        maxWidthDiskCache: 1000,
+                        placeholder: (_, __) => Container(
+                          color: AppColors.surfaceVariant,
+                          child: const Icon(Icons.play_circle_outline, color: Colors.white70, size: 48),
+                        ),
+                        errorWidget: (_, __, ___) => Container(
                           color: AppColors.surfaceVariant,
                           child: const Icon(Icons.play_circle_outline, color: Colors.white70, size: 48),
                         ),

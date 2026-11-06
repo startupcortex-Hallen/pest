@@ -1,7 +1,18 @@
 # Flutter/Dart project root ignores
 .dart_tool/
 build/
+*.apk
 .flutter-plugins
+
+# Segredos de assinatura Android
+android/key.properties
+android/*.jks
+android/*.keystore
+o_pest_shop/android/key.properties
+o_pest_shop/android/*.jks
+o_pest_shop/android/*.keystore
+o_pest_shop/android/app/*.jks
+o_pest_shop/android/app/*.keystore
 .flutter-plugins-dependencies
 
 # IDE
@@ -14,3 +25,11 @@ build/
 Thumbs.db
 .DS_Store
 Desktop.ini
+
+# Backups locais (não versionar dados de produção)
+backups/
+
+# Catálogo estático e imagens otimizadas (gerados no build)
+o_pest_shop/web/data/*.json
+o_pest_shop/web/img/
+node_modules/

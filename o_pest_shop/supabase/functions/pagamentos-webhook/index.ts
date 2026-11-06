@@ -3,6 +3,7 @@
 // Segurança:
 //   • Valida a assinatura `x-authenticity-token` = SHA-256(token + "-" + body)
 //   • Idempotente: cada payload é processado uma única vez (pagamentos_eventos)
+//   • Devolve 5xx quando o processamento falha para o PagBank reenviar
 //
 // Deploy OBRIGATORIAMENTE com --no-verify-jwt (o PagBank não envia JWT):
 //   supabase functions deploy pagamentos-webhook --no-verify-jwt
@@ -13,6 +14,7 @@ import { aplicarComprovante } from '../_shared/pagamentos_db.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const MAX_TENTATIVAS = 8;
 
 async function sha256hex(texto: string): Promise<string> {
   const dados = new TextEncoder().encode(texto);
@@ -55,14 +57,48 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  // Idempotência: mesmo payload processado 1x só.
+  // Idempotência com contador de tentativas: uma falha real NÃO vira
+  // "duplicado". O PagBank recebe 500 e reenvia.
   const eventoId = await sha256hex(raw);
-  const { error: erroEvento } = await admin
+  const { data: existente } = await admin
     .from('pagamentos_eventos')
-    .insert({ evento_id: eventoId });
-  if (erroEvento) {
-    // Duplicado → já processado.
+    .select('evento_id, processado_em, tentativas')
+    .eq('evento_id', eventoId)
+    .maybeSingle();
+  if (existente?.['processado_em']) {
     return new Response('ok (duplicado)', { status: 200 });
+  }
+
+  const tentativas = Number(existente?.['tentativas'] ?? 0) + 1;
+  if (existente && tentativas > MAX_TENTATIVAS) {
+    await admin
+      .from('pagamentos_eventos')
+      .update({
+        erro: 'Limite de tentativas atingido; revisar na conciliação.',
+        processado_em: new Date().toISOString(),
+      })
+      .eq('evento_id', eventoId);
+    console.error('webhook: limite de tentativas atingido', eventoId);
+    return new Response('ok (limite de tentativas)', { status: 200 });
+  }
+
+  if (existente) {
+    await admin
+      .from('pagamentos_eventos')
+      .update({ tentativas })
+      .eq('evento_id', eventoId);
+  } else {
+    const { error: erroInsert } = await admin
+      .from('pagamentos_eventos')
+      .insert({ evento_id: eventoId, payload: corpo, tentativas });
+    if (erroInsert) {
+      // Corrida com outro reenvio do mesmo payload: deixa o outro processar.
+      if (erroInsert.code === '23505') {
+        return new Response('ok (em processamento)', { status: 200 });
+      }
+      console.error('webhook: falha ao registrar evento:', erroInsert);
+      return new Response('falha ao registrar evento', { status: 500 });
+    }
   }
 
   try {
@@ -70,6 +106,9 @@ Deno.serve(async (req) => {
     const charges = Array.isArray(corpo['charges'])
       ? (corpo['charges'] as Record<string, unknown>[])
       : [corpo];
+
+    let encontrados = 0;
+    let naoEncontrados = 0;
 
     for (const charge of charges) {
       const chargeId = charge['id'] as string | undefined;
@@ -97,6 +136,7 @@ Deno.serve(async (req) => {
         pagamento = data ?? null;
       }
       if (!pagamento) {
+        naoEncontrados++;
         console.warn('webhook: cobrança sem pagamento local', chargeId, psOrderId);
         continue;
       }
@@ -105,16 +145,48 @@ Deno.serve(async (req) => {
         ? { id: psOrderId, charges: [charge] }
         : { charges: [charge] };
       const { comprovante } = extrairComprovante(pseudoOrder);
-      if (comprovante['status']) {
-        comprovante['status'] = mapearStatus((charge['status'] as string) ?? '');
+      const statusGateway = typeof charge['status'] === 'string' ? charge['status'] : '';
+      if (statusGateway) {
+        comprovante['status'] = mapearStatus(statusGateway);
       }
-      await aplicarComprovante(admin, pagamento['id'] as number, comprovante);
-    }
-  } catch (e) {
-    console.error('webhook erro ao processar:', e);
-    // 200 mesmo em falha interna: o gateway reenviaria em loop.
-    // O polling da tela (consultar) reconcilia casos raros.
-  }
 
-  return new Response('ok', { status: 200 });
+      const resultado = await aplicarComprovante(
+        admin,
+        pagamento['id'] as number,
+        comprovante,
+      );
+      if (resultado.revisaoManual) {
+        console.error(
+          'webhook: pagamento exige revisão manual:',
+          pagamento['id'],
+          resultado.revisaoMotivo,
+        );
+      }
+      encontrados++;
+    }
+
+    if (encontrados === 0 && naoEncontrados > 0) {
+      // Provável corrida: o webhook chegou antes do INSERT do pagamento.
+      throw new Error('Cobrança ainda não registrada no banco local.');
+    }
+
+    await admin
+      .from('pagamentos_eventos')
+      .update({
+        processado_em: new Date().toISOString(),
+        erro: null,
+      })
+      .eq('evento_id', eventoId);
+
+    return new Response('ok', { status: 200 });
+  } catch (e) {
+    const mensagem = e instanceof Error ? e.message : String(e);
+    console.error('webhook erro ao processar:', e);
+    await admin
+      .from('pagamentos_eventos')
+      .update({ erro: mensagem, tentativas })
+      .eq('evento_id', eventoId);
+    // 500 → o PagBank reenvia. A consulta ativa (`consultar`) também reconcilia.
+    return new Response('erro interno; tentaremos novamente', { status: 500 });
+  }
 });

@@ -59,9 +59,6 @@ class _FeedCardState extends State<FeedCard> {
 
   Color _badgeColor() {
     switch (widget.categoria.toLowerCase()) {
-      case 'vaga':
-      case 'emprego':
-        return ThemeColors.success(context);
       case 'notícia':
       case 'noticia':
       case 'novidade':
@@ -272,6 +269,8 @@ class _FeedCardState extends State<FeedCard> {
                 imageUrl: widget.imagemUrl!,
                 width: double.infinity,
                 fit: BoxFit.cover,
+                memCacheWidth: 900,
+                maxWidthDiskCache: 1200,
                 useOldImageOnUrlChange: true,
                 fadeInDuration: Duration.zero,
                 fadeOutDuration: Duration.zero,

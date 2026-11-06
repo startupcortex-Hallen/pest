@@ -4,6 +4,9 @@
 // Em desenvolvimento, localhost continua liberado.
 
 const DEFAULT_ORIGINS = [
+  'https://opest.com.br',
+  'https://www.opest.com.br',
+  'https://o-pest-shop.pages.dev',
   'https://startupcortex-hallen.github.io',
   'http://localhost:8080',
   'http://localhost:3000',

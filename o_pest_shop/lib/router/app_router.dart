@@ -18,25 +18,49 @@ import '../ui/screens/feed/post_detail_screen.dart';
 import '../ui/screens/feed/aviso_detail_screen.dart';
 import '../ui/screens/feed/novidade_detail_screen.dart';
 import '../ui/screens/feed/evento_detail_screen.dart';
-import '../ui/screens/feed/vaga_detail_screen.dart';
 import '../ui/screens/feed/unidade_screen.dart';
 import '../ui/screens/chat/chat_screen.dart';
 import '../ui/screens/chat/central_atendimento_screen.dart';
 import '../ui/screens/favorites/favorites_screen.dart';
 import '../ui/screens/home/home_screen.dart';
 import '../ui/screens/pedidos/pedidos_screen.dart';
-import '../ui/screens/profile/assinaturas_screen.dart';
 import '../ui/screens/profile/profile_screen.dart';
 import '../ui/screens/cart/cart_screen.dart';
 import '../ui/screens/pedidos/pedidos_screen.dart';
 import '../ui/screens/admin/admin_screen.dart';
+import '../ui/screens/admin/pedido_admin_detail_screen.dart';
 import '../ui/screens/entregador/area_entregador_screen.dart';
-import '../ui/screens/profissional/area_profissional_screen.dart';
 import '../ui/screens/pedidos/pedidos_loja_screen.dart';
 import '../ui/navigation/main_shell.dart';
 
 class AppRouter {
   AppRouter._();
+
+  /// Catálogo/feed/lojas são públicos; carrinho, conta, pedidos e painéis
+  /// continuam exigindo login.
+  static bool _rotaPublica(String location) {
+    if (location.isEmpty || location == '/' || location.startsWith('/?')) {
+      return true;
+    }
+    const exatas = {
+      '/login',
+      '/register',
+      '/redefinir-senha',
+      '/busca',
+    };
+    if (exatas.contains(location)) return true;
+    const prefixos = [
+      '/busca?',
+      '/produto/',
+      '/categoria/',
+      '/unidade/',
+      '/post/',
+      '/aviso/',
+      '/novidade/',
+      '/evento/',
+    ];
+    return prefixos.any(location.startsWith);
+  }
 
   static final GoRouter router = GoRouter(
     refreshListenable: AuthRefreshNotifier.instance,
@@ -48,6 +72,14 @@ class AppRouter {
 
       if (location == '/splash') return null;
 
+      final destino = state.uri.queryParameters['redirect'];
+      if (destino != null &&
+          destino.startsWith('/') &&
+          !destino.startsWith('//') &&
+          _rotaPublica(destino)) {
+        return destino;
+      }
+
       // Abriu o app pelo link de recuperação: manda direto para "Nova senha".
       if (PasswordRecoveryFlag.pending && isLoggedIn && location == '/') {
         return '/redefinir-senha';
@@ -56,7 +88,7 @@ class AppRouter {
       if (isLoggedIn && (location == '/login' || location == '/register')) {
         return '/';
       }
-      if (!isLoggedIn && location != '/login' && location != '/register') {
+      if (!isLoggedIn && !_rotaPublica(location)) {
         return '/login';
       }
       return null;
@@ -161,13 +193,6 @@ class AppRouter {
         },
       ),
       GoRoute(
-        path: '/vaga/:id',
-        builder: (context, state) {
-          final vagaId = state.pathParameters['id'] ?? '';
-          return VagaDetailScreen(postId: vagaId);
-        },
-      ),
-      GoRoute(
         path: '/unidade/:id',
         builder: (context, state) {
           final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
@@ -178,12 +203,13 @@ class AppRouter {
         path: '/pedidos',
         builder: (context, state) => const PedidosScreen(),
       ),
-      GoRoute(
-        path: '/assinaturas',
-        builder: (context, state) => const AssinaturasScreen(),
-      ),
       GoRoute(path: '/chat/:id/:nome', builder: (_, s) => ChatScreen(
         unidadeId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
+        unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
+      )),
+      GoRoute(path: '/chat-conversa/:id/:nome', builder: (_, s) => ChatScreen(
+        conversaId: int.tryParse(s.pathParameters['id'] ?? ''),
+        unidadeId: 0,
         unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
       )),
       GoRoute(path: '/central-atendimento', builder: (_, s) => const CentralAtendimentoScreen()),
@@ -203,21 +229,21 @@ class AppRouter {
         builder: (context, state) {
           final auth = context.read<AuthProvider>();
           final funcao = auth.user?.funcao;
-          if (funcao != 'admin' && funcao != 'atendente') {
+          if (funcao != 'admin' && funcao != 'atendente' && funcao != 'gestor') {
             return const MainShell();
           }
           return const PedidosLojaScreen();
         },
       ),
       GoRoute(
-        path: '/area-profissional',
+        path: '/painel-loja',
         builder: (context, state) {
           final auth = context.read<AuthProvider>();
           final funcao = auth.user?.funcao;
-          if (funcao != 'admin' && funcao != 'nutricionista' && funcao != 'personal') {
+          if (funcao != 'admin' && funcao != 'gestor' && funcao != 'atendente') {
             return const MainShell();
           }
-          return const AreaProfissionalScreen();
+          return const AdminScreen(modoParceiro: true);
         },
       ),
       GoRoute(
@@ -226,6 +252,19 @@ class AppRouter {
           final auth = context.read<AuthProvider>();
           if (auth.user?.funcao != 'admin') return const MainShell();
           return const AdminScreen();
+        },
+      ),
+      GoRoute(
+        path: '/admin/pedidos/:id',
+        builder: (context, state) {
+          final auth = context.read<AuthProvider>();
+          final funcao = auth.user?.funcao;
+          if (funcao != 'admin' && funcao != 'atendente' && funcao != 'gestor') {
+            return const MainShell();
+          }
+          final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
+          if (id <= 0) return const MainShell();
+          return PedidoAdminDetailScreen(pedidoId: id);
         },
       ),
     ],

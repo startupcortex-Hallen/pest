@@ -1,8 +1,10 @@
 # Pagamentos reais (PagBank) — Passo a passo
 
-A loja agora cobra de verdade: **PIX, cartão de crédito, cartão de débito (3DS)
-e boleto**, com confirmação automática via webhook e comprovante no painel
-admin e no pedido do cliente.
+> Guia operacional completo: [`docs/GO_LIVE.md`](../docs/GO_LIVE.md)
+
+A loja cobra de verdade: **PIX, cartão de crédito, cartão de débito (3DS) e
+boleto**, com confirmação automática via webhook, comprovante no painel admin
+e no pedido do cliente, além de cancelamento/estorno pelo app.
 
 ## 1. Criar a conta e pegar o token
 
@@ -13,24 +15,19 @@ admin e no pedido do cliente.
    (https://developer.pagbank.com.br → Obter access token).
 3. Cadastre uma **chave PIX** na conta (obrigatório para gerar QR Code).
 
-## 2. Aplicar os SQLs no banco
+## 2. Aplicar o banco
 
-No SQL Editor do Supabase (ou `supabase db push`), nesta ordem:
+Use as migrations versionadas (a ordem completa está no `README.md` e no
+`docs/GO_LIVE.md`):
 
-1. `supabase/migrations/20261018120000_schema_faltante_v2.sql`
-   - cria as tabelas de academia/nutrição que faltavam, colunas
-     (`unidades.latitude/longitude`, `produtos.vendas/frete_gratis/...`),
-     FKs, RLS das tabelas novas, buckets do Storage e o trigger de perfil.
-   - no final imprime um **relatório de auditoria de RLS** (tabela, RLS ligada, qtd. policies).
-2. `supabase/migrations/20261017120000_pagamentos_gateway.sql`
-   - cria `pagamentos` / `pagamentos_eventos`, vincula pedidos, RLS, realtime
-   - **revoga** do cliente as RPCs antigas `confirmar_pagamento` e
-     `processar_pagamento_cartao` (fim do "Já paguei" — confirmação agora
-     só pelo webhook assinado).
+```bash
+cd o_pest_shop
+supabase link --project-ref SEU_PROJECT_REF
+supabase db push --include-all
+```
 
-> O segundo script precisa rodar **por último** entre os de pagamento.
-> Depois dele, rode também `20261018130000_revogar_rpc_publicas.sql`, que
-> fecha o furo das funções antigas (EXECUTE herdado de PUBLIC).
+> Não rode os scripts SQL antigos soltos (`sql_*.sql`). Eles foram arquivados em
+> `legacy_sql/` porque reabriam RPCs de pagamento manual.
 
 ## 3. Configurar secrets e publicar as Edge Functions
 
@@ -88,17 +85,25 @@ O app envia automaticamente `notification_urls` apontando para
   PagBank (RSA) — o número do cartão nunca é salvo no nosso banco. Cartões
   "salvos" guardam apenas o token do gateway (`CARD_...`), bandeira e últimos 4;
   o **CVV nunca é armazenado** (pedido a cada compra).
-- **CPF** é validado (dígito verificador) no app e no servidor. Nos cartões
-  salvos guardamos só o CPF mascarado (`***.456.789-**`); o CPF completo fica
-  apenas em `perfis` (LGPD).
+- **CPF e nome completo são obrigatórios em TODAS as formas de pagamento**,
+  inclusive PIX (o PagBank exige `customer.tax_id`). O CPF é validado (dígito
+  verificador) no app e no servidor. Nos cartões salvos guardamos só o CPF
+  mascarado (`***.456.789-**`); o CPF completo fica apenas em `perfis` (LGPD).
 - **Rate limit**: a Edge Function limita 5 cobranças por 10 min e 3 tentativas
   de cartão por 15 min por usuário (HTTP 429) — proteção contra teste de cartão.
 - **CORS restrito** ao domínio da loja + localhost (ajuste com o secret
   `ALLOWED_ORIGINS=https://seudominio.com` se mudar de domínio).
-- **Webhook** valida a assinatura `x-authenticity-token` (SHA-256) e é
-  idempotente; sem `PAGBANK_TOKEN` configurado ele recusa tudo (fail closed).
+- **Webhook** valida a assinatura `x-authenticity-token` (SHA-256), é
+  idempotente e devolve **500** em falha real para o PagBank reenviar; sem
+  `PAGBANK_TOKEN` configurado ele recusa tudo (fail closed).
+- **Estorno/cancelamento** existe no Admin e em Meus Pedidos. Pedido pago é
+  estornado no gateway antes de ser cancelado; cobrança pendente é cancelada
+  no gateway. Se o gateway falhar, o pedido **não** é encerrado.
+- **Estoque** é reservado no checkout (evita vender o mesmo item duas vezes).
+  No cancelamento/expiração o estoque e o cupom voltam.
 - Boleto libera o pedido só após a compensação (1–2 dias úteis) — o status
-  muda sozinho pelo webhook.
+  muda sozinho pelo webhook. O cancelamento automático só ocorre depois do
+  vencimento + 1 dia, quando o boleto não pode mais ser pago.
 - Valores são **recalculados no servidor** a partir dos pedidos — o app nunca
   envia preço.
 

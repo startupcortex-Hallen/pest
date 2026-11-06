@@ -17,7 +17,7 @@ class EnderecoService {
     return response.map((json) => Endereco.fromJson(json)).toList();
   }
 
-  Future<void> adicionar(
+  Future<int> adicionar(
     String userId, {
     required String apelido,
     required String cep,
@@ -28,20 +28,33 @@ class EnderecoService {
     required String cidade,
     required String uf,
     bool principal = false,
+    double? latitude,
+    double? longitude,
+    String? geocodeFonte,
   }) async {
     if (principal) await _limparPrincipal(userId);
-    await _client.from('enderecos_usuario').insert({
-      'user_id': userId,
-      'apelido': apelido,
-      'cep': cep,
-      'rua': rua,
-      'numero': numero,
-      'complemento': complemento,
-      'bairro': bairro,
-      'cidade': cidade,
-      'uf': uf,
-      'principal': principal,
-    });
+    final inserido = await _client
+        .from('enderecos_usuario')
+        .insert({
+          'user_id': userId,
+          'apelido': apelido,
+          'cep': cep,
+          'rua': rua,
+          'numero': numero,
+          'complemento': complemento,
+          'bairro': bairro,
+          'cidade': cidade,
+          'uf': uf,
+          'principal': principal,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
+          if (latitude != null && longitude != null)
+            'geocodificado_em': DateTime.now().toUtc().toIso8601String(),
+          if (geocodeFonte != null) 'geocode_fonte': geocodeFonte,
+        })
+        .select('id')
+        .single();
+    return (inserido['id'] as num).toInt();
   }
 
   Future<void> atualizar(
@@ -56,6 +69,9 @@ class EnderecoService {
     required String cidade,
     required String uf,
     bool principal = false,
+    double? latitude,
+    double? longitude,
+    String? geocodeFonte,
   }) async {
     if (principal) await _limparPrincipal(userId, excetoId: id);
     await _client.from('enderecos_usuario').update({
@@ -68,6 +84,11 @@ class EnderecoService {
       'cidade': cidade,
       'uf': uf,
       'principal': principal,
+      'latitude': latitude,
+      'longitude': longitude,
+      if (latitude != null && longitude != null)
+        'geocodificado_em': DateTime.now().toUtc().toIso8601String(),
+      'geocode_fonte': geocodeFonte,
     }).eq('id', id);
   }
 

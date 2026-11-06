@@ -52,7 +52,6 @@ class _FeedScreenState extends State<FeedScreen> {
     switch (cat.toLowerCase()) {
       case 'avisos': return Icons.campaign_rounded;
       case 'eventos': return Icons.event_rounded;
-      case 'vagas': return Icons.work_rounded;
       case 'novidades': return Icons.new_releases_rounded;
       default: return Icons.circle_rounded;
     }
@@ -82,7 +81,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     return _buildEmptyState();
                   }
                   return RefreshIndicator(
-                    onRefresh: () => feed.loadFeed(),
+                    onRefresh: () => feed.loadFeed(force: true),
                     child: _buildFeed(context, feed),
                   );
                 },

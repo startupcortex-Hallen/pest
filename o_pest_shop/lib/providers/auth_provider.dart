@@ -48,6 +48,15 @@ class AuthProvider extends ChangeNotifier {
     try {
       final profile = await _authService.getProfile(userId);
       if (profile != null) {
+        if (profile.statusConta != 'ativo') {
+          await _authService.signOut();
+          _user = null;
+          _error = profile.statusConta == 'anonimizado'
+              ? 'Esta conta foi anonimizada e não pode mais ser acessada.'
+              : 'Sua conta está bloqueada. Fale com o suporte.';
+          _safeNotify();
+          return;
+        }
         _user = profile;
         debugPrint('████ Perfil carregado do banco: ${profile.nome}');
       } else {
@@ -192,7 +201,7 @@ class AuthProvider extends ChangeNotifier {
       return 'Email ou senha incorretos.';
     }
     if (lower.contains('password')) {
-      return 'A senha deve ter no mínimo 6 caracteres.';
+      return 'A senha deve ter no mínimo 8 caracteres, com letras e números.';
     }
     if (lower.contains('email')) {
       return 'Email inválido.';

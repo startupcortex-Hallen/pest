@@ -11,6 +11,7 @@ class CartItem {
   final String? produtoImagem;
   final int? produtoEstoque;
   final int? produtoUnidadeId;
+  final double? produtoPesoKg;
   final bool produtoEmPromocao;
   final bool produtoFreteGratis;
 
@@ -27,6 +28,7 @@ class CartItem {
     this.produtoImagem,
     this.produtoEstoque,
     this.produtoUnidadeId,
+    this.produtoPesoKg,
     this.produtoEmPromocao = false,
     this.produtoFreteGratis = false,
   });
@@ -39,7 +41,8 @@ class CartItem {
   double get precoAtual =>
       temPromocao ? produtoPrecoPromocional! : (produtoPreco ?? 0);
 
-  double get economiaPorItem => ((produtoPreco ?? 0) - precoAtual).clamp(0, double.infinity);
+  double get economiaPorItem =>
+      ((produtoPreco ?? 0) - precoAtual).clamp(0, double.infinity);
 
   double get economia => economiaPorItem * quantidade;
 
@@ -66,20 +69,22 @@ class CartItem {
       createdAt: json['created_at'] as String?,
       produtoNome: produto?['nome'] as String?,
       produtoPreco: (produto?['preco'] as num?)?.toDouble(),
-      produtoPrecoPromocional: (produto?['preco_promocional'] as num?)?.toDouble(),
+      produtoPrecoPromocional: (produto?['preco_promocional'] as num?)
+          ?.toDouble(),
       produtoImagem: imagem,
       produtoEstoque: produto?['estoque'] as int?,
       produtoUnidadeId: produto?['unidade_id'] as int?,
+      produtoPesoKg: (produto?['peso_kg'] as num?)?.toDouble(),
       produtoEmPromocao: produto?['em_promocao'] == true,
       produtoFreteGratis: produto?['frete_gratis'] == true,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'user_id': userId,
-        'produto_id': produtoId,
-        'quantidade': quantidade,
-        'cor': cor,
-      };
+    'id': id,
+    'user_id': userId,
+    'produto_id': produtoId,
+    'quantidade': quantidade,
+    'cor': cor,
+  };
 }

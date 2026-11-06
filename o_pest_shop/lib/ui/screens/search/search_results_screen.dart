@@ -1,11 +1,10 @@
 ﻿import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../models/produto.dart';
-import '../../../providers/home_provider.dart';
+import '../../../services/catalogo_service.dart';
 import '../../../services/produto_service.dart';
 import '../../widgets/product_card.dart';
 import '../product/product_detail_screen.dart';
@@ -65,14 +64,66 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
 
   Future<void> _carregarDadosFiltros() async {
     try {
+      final catalogo = CatalogoService();
+      final locais = await catalogo.carregarProdutosLocais();
+      var snapshot = await catalogo.lerCache();
+      if (snapshot == null) {
+        final estatico = await catalogo.buscarEstatico();
+        if (estatico != null) {
+          snapshot = CatalogoSnapshot.fromJson(estatico);
+          await catalogo.salvarCache(estatico);
+        }
+      }
+
       final cats = await _produtoService.fetchCategorias();
-      final marcas = await Supabase.instance.client.from('marcas').select('id, nome').order('nome');
-      final unidades = await Supabase.instance.client.from('unidades').select('id, nome, foto_url').order('nome');
+
+      final marcas = <int, String>{};
+      if (locais.isNotEmpty) {
+        for (final p in locais) {
+          final id = p['marca_id'];
+          final nome = p['marca_nome'];
+          if (id is int && nome is String && nome.trim().isNotEmpty) {
+            marcas[id] = nome.trim();
+          }
+        }
+      } else {
+        final remoto = await Supabase.instance.client
+            .from('marcas')
+            .select('id,nome')
+            .order('nome');
+        if (remoto is List) {
+          for (final m in remoto.whereType<Map>()) {
+            final id = m['id'];
+            final nome = m['nome'];
+            if (id is int && nome is String) marcas[id] = nome;
+          }
+        }
+      }
+
+      var unidades = snapshot?.unidades ?? const <Map<String, dynamic>>[];
+      if (unidades.isEmpty) {
+        final remoto = await Supabase.instance.client
+            .from('unidades_publicas')
+            .select('id,nome,foto_url')
+            .order('nome');
+        if (remoto is List) {
+          unidades = remoto
+              .whereType<Map>()
+              .map((e) => e.cast<String, dynamic>())
+              .toList(growable: false);
+        }
+      }
+
+      final listaMarcas = marcas.entries
+          .map((e) => <String, dynamic>{'id': e.key, 'nome': e.value})
+          .toList(growable: false)
+        ..sort((a, b) => (a['nome'] as String).compareTo(b['nome'] as String));
+
       if (!mounted) return;
       setState(() {
         _categorias = cats.map((c) => {'id': c.id, 'nome': c.nome}).toList();
-        _marcas = (marcas as List).cast<Map<String, dynamic>>();
-        _unidades = (unidades as List).cast<Map<String, dynamic>>();
+        _marcas = listaMarcas;
+        _unidades = unidades;
       });
     } catch (_) {}
   }
@@ -263,7 +314,15 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                                             width: double.infinity,
                                             color: const Color(0xFF1F1F1F),
                                             child: fotoUrl != null && fotoUrl.isNotEmpty
-                                                ? Image.network(fotoUrl, fit: BoxFit.cover)
+                                                ? CachedNetworkImage(
+                                                    imageUrl: fotoUrl,
+                                                    fit: BoxFit.cover,
+                                                    memCacheWidth: 240,
+                                                    placeholder: (_, __) => const SizedBox.shrink(),
+                                                    errorWidget: (_, __, ___) => Center(
+                                                      child: Icon(Icons.store_rounded, size: 28, color: const Color(0xFFBBBBBB)),
+                                                    ),
+                                                  )
                                                 : Center(child: Icon(Icons.store_rounded, size: 28, color: const Color(0xFFBBBBBB))),
                                           ),
                                         ),
@@ -516,7 +575,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                     controller: _searchCtrl,
                     onChanged: _onSearchChanged,
                     decoration: InputDecoration(
-                      hintText: 'Buscar na AH ACADEMIAS',
+                      hintText: 'Buscar na O Pest',
                       prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF9C9C9C), size: 20),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),

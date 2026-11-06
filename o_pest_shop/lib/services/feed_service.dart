@@ -8,30 +8,32 @@ class FeedService {
   final SupabaseClient _client = SupabaseService.instance.client;
 
   Future<List<FeedPost>> fetchPosts({String? currentUserId}) async {
+    // Traz apenas contadores (IDs) de comentários/likes. O texto completo dos
+    // comentários é carregado só no detalhe, evitando payload gigante no feed.
     final response = await _client
         .from('posts_feed')
-        .select('*, post_likes(user_id), post_comentarios(*), unidades(id, nome, foto_url)')
+        .select(
+          'id,user_id,titulo,descricao,url_imagem,url_youtube,categoria,'
+          'created_at,unidade_id,'
+          'post_likes(user_id),post_comentarios(id),'
+          'unidades(id,nome,foto_url)',
+        )
         .order('created_at', ascending: false)
         .limit(20);
 
-    if (response is! List) {
-      debugPrint('████ fetchPosts response nao é List: $response');
-      return [];
-    }
-    debugPrint('████ fetchPosts raw rows: ${response.length}');
-    if (response.isNotEmpty) {
-      debugPrint('████ primeiro post raw: ${response.first}');
-    }
+    if (response is! List) return const [];
+
     final posts = <FeedPost>[];
     for (final json in response) {
       try {
-        posts.add(FeedPost.fromJson(json as Map<String, dynamic>, currentUserId: currentUserId));
+        final mapa = json as Map<String, dynamic>;
+        final categoria = (mapa['categoria'] as String? ?? '').toLowerCase();
+        if (categoria.startsWith('vaga') || categoria == 'emprego') continue;
+        posts.add(FeedPost.fromJson(mapa, currentUserId: currentUserId));
       } catch (e) {
-        debugPrint('████ ERRO ao parsear post: $e');
-        debugPrint('████ JSON do post com erro: $json');
+        debugPrint('Erro ao parsear post: $e');
       }
     }
-    debugPrint('████ fetchPosts parsed: ${posts.length} posts');
     return posts;
   }
 
@@ -79,16 +81,18 @@ class FeedService {
 
   Future<List<String>> fetchCategorias() async {
     try {
-      final response = await _client
-          .from('posts_feed')
-          .select('categoria')
-          .order('created_at', ascending: false);
-
+      final response = await _client.rpc('feed_categorias');
       if (response is! List) return [];
       final categorias = response
-          .map((json) => (json as Map<String, dynamic>)['categoria'] as String?)
-          .where((c) => c != null && c.isNotEmpty)
-          .map((c) => c!)
+          .map((json) {
+            if (json is Map) return json['categoria'] as String?;
+            return json as String?;
+          })
+          .whereType<String>()
+          .where((c) =>
+              c.isNotEmpty &&
+              !c.toLowerCase().startsWith('vaga') &&
+              c.toLowerCase() != 'emprego')
           .toSet()
           .toList();
       categorias.sort();
@@ -100,51 +104,32 @@ class FeedService {
   }
 
   Future<List<FeedComment>> fetchComments(String postId) async {
-    final response = await _client
-        .from('post_comentarios')
-        .select()
-        .eq('post_id', postId)
-        .order('created_at', ascending: true);
+    // Join com o perfil elimina uma consulta por comentário (N+1). Se o join
+    // não estiver disponível para anônimos, cai no select simples.
+    dynamic response;
+    try {
+      response = await _client
+          .from('post_comentarios')
+          .select('*, perfis(nome, avatar_url)')
+          .eq('post_id', postId)
+          .order('created_at', ascending: true);
+    } catch (_) {
+      response = await _client
+          .from('post_comentarios')
+          .select()
+          .eq('post_id', postId)
+          .order('created_at', ascending: true);
+    }
 
     if (response is! List) return [];
     final comments = <FeedComment>[];
     for (final json in response) {
       try {
-        final c = json as Map<String, dynamic>;
-        // Busca perfil do autor separadamente (FK pode não existir)
-        try {
-          final perfil = await _client
-              .from('perfis')
-              .select('nome, avatar_url')
-              .eq('id', c['user_id'])
-              .maybeSingle();
-          if (perfil != null) {
-            c['perfis'] = perfil;
-          } else {
-            debugPrint('████ Perfil não encontrado para user_id=${c['user_id']}');
-          }
-        } catch (e) {
-          debugPrint('████ ERRO ao buscar perfil do comentário: $e');
-        }
-        comments.add(FeedComment.fromJson(c));
+        comments.add(FeedComment.fromJson(json as Map<String, dynamic>));
       } catch (e) {
-        debugPrint('████ ERRO ao parsear comentário: $e');
+        debugPrint('Erro ao parsear comentário: $e');
       }
     }
     return comments;
-  }
-
-  Future<bool> checkCandidatura(String vagaId, String userId) async {
-    final response = await _client
-        .from('candidaturas')
-        .select('id')
-        .eq('vaga_id', vagaId)
-        .eq('user_id', userId)
-        .maybeSingle();
-    return response != null;
-  }
-
-  Future<void> submitCandidatura(Map<String, dynamic> data) async {
-    await _client.from('candidaturas').insert(data);
   }
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -37,14 +38,36 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuth() async {
-    await Future.delayed(const Duration(seconds: 2));
+    // A home é pública; não bloqueia o visitante esperando o perfil carregar.
+    await Future.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
-    final auth = context.read<AuthProvider>();
-    if (auth.isAuthenticated) {
-      context.go('/');
-    } else {
-      context.go('/login');
+    // Mantém o provider vivo até a primeira navegação para que o
+    // AuthProvider restaure a sessão em segundo plano.
+    context.read<AuthProvider>();
+
+    // Deep link vindo do 404.html do GitHub Pages.
+    final destino = _deepLink();
+    context.go(destino ?? '/');
+  }
+
+  String? _deepLink() {
+    if (!kIsWeb) return null;
+    final redirect = Uri.base.queryParameters['redirect'];
+    if (redirect == null || !redirect.startsWith('/') || redirect.startsWith('//')) {
+      return null;
     }
+    const permitidos = [
+      '/produto/',
+      '/categoria/',
+      '/unidade/',
+      '/post/',
+      '/aviso/',
+      '/novidade/',
+      '/evento/',
+      '/busca',
+    ];
+    if (!permitidos.any(redirect.startsWith)) return null;
+    return redirect;
   }
 
   @override

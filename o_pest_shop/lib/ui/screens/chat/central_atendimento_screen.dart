@@ -151,7 +151,7 @@ class _CentralAtendimentoScreenState extends State<CentralAtendimentoScreen> {
           ],
         ),
         trailing: Text(hora, style: const TextStyle(fontSize: 11, color: Color(0xFF9C9C9C))),
-        onTap: () => context.push('/chat/$conversaId/${Uri.encodeComponent(nomeCliente)}'),
+        onTap: () => context.push('/chat-conversa/$conversaId/${Uri.encodeComponent(nomeCliente)}'),
       ),
     );
   }

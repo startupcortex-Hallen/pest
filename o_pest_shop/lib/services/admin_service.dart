@@ -6,13 +6,29 @@ import 'supabase_service.dart';
 class AdminService {
   final SupabaseClient _client = SupabaseService.instance.client;
 
+  // ─── DASHBOARD ─────────────────────────────────────
+
+  Future<Map<String, dynamic>> fetchDashboard({
+    int? unidadeId,
+    int dias = 30,
+  }) async {
+    final resultado = await _client.rpc(
+      'dashboard_resumo',
+      params: {'p_unidade_id': unidadeId, 'p_dias': dias},
+    );
+    if (resultado is Map) return resultado.cast<String, dynamic>();
+    return {};
+  }
+
   // ─── PRODUTOS ──────────────────────────────────────
 
   Future<List<Produto>> fetchProdutos({String? search}) async {
-    final response = await _client
-        .from('produtos')
-        .select('*, categorias(nome), marcas(nome), unidades(nome)')
-        .order('id');
+    // A leitura administrativa passa por RPC porque a tabela base não expõe
+    // custo/ML para o role authenticated (proteção contra vazamento).
+    final response = await _client.rpc(
+      'admin_listar_produtos',
+      params: {'p_unidade_id': null},
+    );
     if (response is! List) return [];
     final lista = response
         .map((json) => Produto.fromJson(json as Map<String, dynamic>))
@@ -21,48 +37,82 @@ class AdminService {
     // Ordena: com estoque → estoque baixo → sem estoque
     lista.sort((a, b) {
       int prio(Produto p) {
-        if (p.estoque <= 0) return 2;   // sem estoque
-        if (p.estoque <= 3) return 1;   // estoque baixo
-        return 0;                        // com estoque
+        if (p.estoque <= 0) return 2; // sem estoque
+        if (p.estoque <= 3) return 1; // estoque baixo
+        return 0; // com estoque
       }
+
       final cmp = prio(a).compareTo(prio(b));
       if (cmp != 0) return cmp;
       return a.id.compareTo(b.id);
     });
 
     if (search != null && search.isNotEmpty) {
-      return lista.where((p) => p.nome.toLowerCase().contains(search.toLowerCase())).toList();
+      return lista
+          .where((p) => p.nome.toLowerCase().contains(search.toLowerCase()))
+          .toList();
     }
     return lista;
   }
 
-  Future<void> insertProduto(Map<String, dynamic> data) async { await _client.from('produtos').insert(data); }
-  Future<void> updateProduto(int id, Map<String, dynamic> data) async { await _client.from('produtos').update(data).eq('id', id); }
+  /// Unidades com os campos privados (PIX/repasse). Somente admin/equipe.
+  Future<List<Map<String, dynamic>>> fetchUnidadesAdmin({int? unidadeId}) async {
+    final response = await _client.rpc(
+      'admin_listar_unidades',
+      params: {'p_unidade_id': unidadeId},
+    );
+    if (response is! List) return [];
+    return response
+        .whereType<Map>()
+        .map((e) => e.cast<String, dynamic>())
+        .toList(growable: false);
+  }
+
+  Future<void> insertProduto(Map<String, dynamic> data) async {
+    await _client.from('produtos').insert(data);
+  }
+
+  Future<void> updateProduto(int id, Map<String, dynamic> data) async {
+    await _client.from('produtos').update(data).eq('id', id);
+  }
+
   Future<void> deleteProduto(int id) async {
-    // Busca imagens antes de deletar para limpar storage
+    // Guarda as URLs, mas só apaga do Storage DEPOIS que o banco confirmar a
+    // exclusão. Se houver pedido vinculado, o delete falha e as fotos do
+    // produto continuam intactas.
+    final urls = <String>[];
     try {
-      final prod = await _client.from('produtos').select('url_imagem').eq('id', id).maybeSingle();
+      final prod = await _client
+          .from('produtos')
+          .select('url_imagem')
+          .eq('id', id)
+          .maybeSingle();
       if (prod != null) {
         final raw = prod['url_imagem'];
-        List<String> urls = [];
         if (raw is List) {
-          urls = raw.cast<String>();
+          urls.addAll(raw.whereType<String>());
         } else if (raw is String) {
           final clean = raw.replaceAll(RegExp(r'[{}"\[\]]'), '');
-          urls = clean.split(',').where((s) => s.trim().isNotEmpty).map((s) => s.trim()).toList();
-        }
-        for (final url in urls) {
-          if (url.contains('/Produtos/')) {
-            final fileName = url.split('/Produtos/').last;
-            try { await _client.storage.from('Produtos').remove([fileName]); } catch (_) {}
-          }
+          urls.addAll(
+            clean
+                .split(',')
+                .where((s) => s.trim().isNotEmpty)
+                .map((s) => s.trim()),
+          );
         }
       }
     } catch (_) {}
-    // Remove vínculos temporários (carrinho/favoritos) antes de excluir o produto
-    try { await _client.from('carrinho').delete().eq('produto_id', id); } catch (_) {}
-    try { await _client.from('favoritos').delete().eq('produto_id', id); } catch (_) {}
+
+    // carrinho/favoritos/galeria têm ON DELETE CASCADE no banco.
     await _client.from('produtos').delete().eq('id', id);
+
+    for (final url in urls) {
+      if (!url.contains('/Produtos/')) continue;
+      final fileName = url.split('/Produtos/').last;
+      try {
+        await _client.storage.from('Produtos').remove([fileName]);
+      } catch (_) {}
+    }
   }
 
   // ─── CATEGORIAS ────────────────────────────────────
@@ -70,12 +120,25 @@ class AdminService {
   Future<List<Categoria>> fetchCategorias() async {
     final response = await _client.from('categorias').select().order('id');
     if (response is! List) return [];
-    return response.map((json) => Categoria.fromJson(json as Map<String, dynamic>)).toList();
+    return response
+        .map((json) => Categoria.fromJson(json as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<void> insertCategoria(String nome, String? icone) async { await _client.from('categorias').insert({'nome': nome, 'icone': icone}); }
-  Future<void> updateCategoria(int id, String nome, String? icone) async { await _client.from('categorias').update({'nome': nome, 'icone': icone}).eq('id', id); }
-  Future<void> deleteCategoria(int id) async { await _client.from('categorias').delete().eq('id', id); }
+  Future<void> insertCategoria(String nome, String? icone) async {
+    await _client.from('categorias').insert({'nome': nome, 'icone': icone});
+  }
+
+  Future<void> updateCategoria(int id, String nome, String? icone) async {
+    await _client
+        .from('categorias')
+        .update({'nome': nome, 'icone': icone})
+        .eq('id', id);
+  }
+
+  Future<void> deleteCategoria(int id) async {
+    await _client.from('categorias').delete().eq('id', id);
+  }
 
   // ─── MARCAS ────────────────────────────────────────
 
@@ -85,149 +148,115 @@ class AdminService {
     return response.cast<Map<String, dynamic>>();
   }
 
-  Future<void> insertMarca(String nome) async { await _client.from('marcas').insert({'nome': nome}); }
-  Future<void> updateMarca(int id, String nome) async { await _client.from('marcas').update({'nome': nome}).eq('id', id); }
-  Future<void> deleteMarca(int id) async { await _client.from('marcas').delete().eq('id', id); }
+  Future<void> insertMarca(String nome) async {
+    await _client.from('marcas').insert({'nome': nome});
+  }
+
+  Future<void> updateMarca(int id, String nome) async {
+    await _client.from('marcas').update({'nome': nome}).eq('id', id);
+  }
+
+  Future<void> deleteMarca(int id) async {
+    await _client.from('marcas').delete().eq('id', id);
+  }
 
   // ─── FEED POSTS ────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> fetchPosts() async {
-    final response = await _client.from('posts_feed').select('*, perfis(nome, funcao), unidades(nome)').order('created_at', ascending: false);
+    final response = await _client
+        .from('posts_feed')
+        .select('*, perfis(nome, funcao), unidades(nome)')
+        .order('created_at', ascending: false);
     if (response is! List) return [];
-    return response.cast<Map<String, dynamic>>();
+    return response
+        .cast<Map<String, dynamic>>()
+        .where((p) {
+          final categoria = (p['categoria'] as String? ?? '').toLowerCase();
+          return !categoria.startsWith('vaga') && categoria != 'emprego';
+        })
+        .toList();
   }
 
-  Future<void> insertPost(Map<String, dynamic> data) async { await _client.from('posts_feed').insert(data); }
-  Future<void> updatePost(String id, Map<String, dynamic> data) async { await _client.from('posts_feed').update(data).eq('id', id); }
+  Future<void> insertPost(Map<String, dynamic> data) async {
+    await _client.from('posts_feed').insert(data);
+  }
+
+  Future<void> updatePost(String id, Map<String, dynamic> data) async {
+    await _client.from('posts_feed').update(data).eq('id', id);
+  }
+
   Future<void> deletePost(String id) async {
-    // Remove vínculos (comentários, curtidas, candidaturas) antes de excluir o post
-    try { await _client.from('post_comentarios').delete().eq('post_id', id); } catch (_) {}
-    try { await _client.from('post_likes').delete().eq('post_id', id); } catch (_) {}
-    try { await _client.from('candidaturas').delete().eq('vaga_id', id); } catch (_) {}
+    // Remove vínculos (comentários e curtidas) antes de excluir o post.
+    try {
+      await _client.from('post_comentarios').delete().eq('post_id', id);
+    } catch (_) {}
+    try {
+      await _client.from('post_likes').delete().eq('post_id', id);
+    } catch (_) {}
     await _client.from('posts_feed').delete().eq('id', id);
-  }
-
-  // ─── CANDIDATURAS ───────────────────────────────────
-
-  Future<List<Map<String, dynamic>>> fetchCandidaturas() async {
-    final response = await _client.from('candidaturas').select('*, posts_feed(titulo)').order('created_at', ascending: false);
-    if (response is! List) return [];
-    final candidaturas = response.cast<Map<String, dynamic>>();
-    for (final c in candidaturas) {
-      final vaga = c['posts_feed'];
-      if (vaga is Map) c['vaga_titulo'] = vaga['titulo'];
-      c.remove('posts_feed');
-    }
-    return candidaturas;
-  }
-
-  Future<void> deleteCandidatura(String id) async { await _client.from('candidaturas').delete().eq('id', id); }
-
-  // ─── NUTRIÇÃO ─────────────────────────────────────
-
-  Future<List<Map<String, dynamic>>> fetchPlanoRefeicoes() async {
-    final r = await _client.from('plano_refeicoes').select('*, perfis(nome)').order('id');
-    return (r as List).cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertPlanoRefeicao(Map<String, dynamic> data) async {
-    await _client.from('plano_refeicoes').insert(data);
-  }
-
-  Future<void> updatePlanoRefeicao(int id, Map<String, dynamic> data) async {
-    await _client.from('plano_refeicoes').update(data).eq('id', id);
-  }
-
-  Future<void> deletePlanoRefeicao(int id) async {
-    await _client.from('plano_refeicoes').delete().eq('id', id);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchAssinaturas() async {
-    final r = await _client.from('assinaturas').select('*, perfis(nome)').order('id', ascending: false);
-    return (r as List).cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertAssinatura(Map<String, dynamic> data) async {
-    await _client.from('assinaturas').insert(data);
-  }
-
-  Future<void> updateAssinatura(int id, Map<String, dynamic> data) async {
-    await _client.from('assinaturas').update(data).eq('id', id);
-  }
-
-  Future<void> deleteAssinatura(int id) async {
-    await _client.from('assinaturas').delete().eq('id', id);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchNutricionistas() async {
-    final r = await _client.from('nutricionistas').select().order('nome');
-    return (r as List).cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertNutricionista(Map<String, dynamic> data) async {
-    await _client.from('nutricionistas').insert(data);
-  }
-
-  Future<void> updateNutricionista(int id, Map<String, dynamic> data) async {
-    await _client.from('nutricionistas').update(data).eq('id', id);
-  }
-
-  Future<void> deleteNutricionista(int id) async {
-    await _client.from('nutricionistas').delete().eq('id', id);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchConsultas() async {
-    final r = await _client.from('consultas').select('*, perfis(nome), nutricionistas(nome)').order('data_hora', ascending: false);
-    return (r as List).cast<Map<String, dynamic>>();
-  }
-
-  Future<void> updateConsultaStatus(int id, String status) async {
-    await _client.from('consultas').update({'status': status}).eq('id', id);
-  }
-
-  // ─── TREINOS ─────────────────────────────────────
-
-  Future<List<Map<String, dynamic>>> fetchTreinos() async {
-    final r = await _client.from('treinos').select('*, exercicios(*), perfis(nome)').order('ordem');
-    return (r as List).cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertTreino(Map<String, dynamic> data) async {
-    await _client.from('treinos').insert(data);
-  }
-
-  Future<void> updateTreino(int id, Map<String, dynamic> data) async {
-    await _client.from('treinos').update(data).eq('id', id);
-  }
-
-  Future<void> deleteTreino(int id) async {
-    // Remove os exercícios do treino antes de excluir
-    try { await _client.from('exercicios').delete().eq('treino_id', id); } catch (_) {}
-    await _client.from('treinos').delete().eq('id', id);
-  }
-
-  Future<void> insertExercicio(Map<String, dynamic> data) async {
-    await _client.from('exercicios').insert(data);
-  }
-
-  Future<void> updateExercicio(int id, Map<String, dynamic> data) async {
-    await _client.from('exercicios').update(data).eq('id', id);
-  }
-
-  Future<void> deleteExercicio(int id) async {
-    await _client.from('exercicios').delete().eq('id', id);
   }
 
   // ─── PEDIDOS ─────────────────────────────────────
 
-  Future<List<Map<String, dynamic>>> fetchPedidos({String? status, String? busca}) async {
+  Future<List<Map<String, dynamic>>> fetchPedidos({
+    String? status,
+    List<String>? statuses,
+    String? busca,
+    int? unidadeId,
+    int limite = 50,
+    int offset = 0,
+  }) async {
+    final filtroStatus = statuses ?? (status == null ? null : [status]);
+    // Paginação, busca, status e escopo de loja são resolvidos no servidor.
+    try {
+      final r = await _client.rpc(
+        'admin_listar_pedidos_v2',
+        params: {
+          'p_busca': busca,
+          'p_statuses': filtroStatus,
+          'p_unidade_id': unidadeId,
+          'p_limit': limite,
+          'p_offset': offset,
+        },
+      );
+      if (r is List) return r.cast<Map<String, dynamic>>();
+      return [];
+    } on PostgrestException catch (e) {
+      // Compatibilidade enquanto a migration nova não foi aplicada.
+      if (e.code != 'PGRST202' && e.code != '42883') rethrow;
+    }
+
+    try {
+      final r = await _client.rpc(
+        'admin_listar_pedidos',
+        params: {
+          'p_busca': busca,
+          'p_status': status,
+          'p_unidade_id': unidadeId,
+          'p_limit': limite,
+          'p_offset': offset,
+        },
+      );
+      if (r is List) return r.cast<Map<String, dynamic>>();
+      return [];
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202' && e.code != '42883') rethrow;
+    }
+
     var query = _client
         .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), perfis!pedidos_user_id_fkey(nome, email, telefone), unidades(nome), pagamentos(*)');
-    if (status != null && status.isNotEmpty) {
-      query = query.eq('status', status);
+        .select(
+          '*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), perfis!pedidos_user_id_fkey(nome, email, telefone), unidades(nome), pagamentos(*)',
+        );
+    if (filtroStatus != null && filtroStatus.isNotEmpty) {
+      query = query.inFilter('status', filtroStatus);
     }
-    final r = await query.order('created_at', ascending: false).limit(100);
+    if (unidadeId != null) {
+      query = query.eq('unidade_id', unidadeId);
+    }
+    final r = await query
+        .order('created_at', ascending: false)
+        .range(offset, offset + limite - 1);
     if (r is! List) return [];
     var pedidos = r.cast<Map<String, dynamic>>();
     if (busca != null && busca.isNotEmpty) {
@@ -236,18 +265,178 @@ class AdminService {
         final perfil = p['perfis'];
         final nome = perfil is Map ? (perfil['nome'] as String? ?? '') : '';
         final email = perfil is Map ? (perfil['email'] as String? ?? '') : '';
-        return nome.toLowerCase().contains(q) || email.toLowerCase().contains(q);
+        return nome.toLowerCase().contains(q) ||
+            email.toLowerCase().contains(q) ||
+            (p['id']?.toString() ?? '') == q;
       }).toList();
     }
     return pedidos;
   }
 
+  Future<Map<String, int>> fetchContadoresPedidos({int? unidadeId}) async {
+    try {
+      final r = await _client.rpc(
+        'admin_contar_pedidos',
+        params: {'p_unidade_id': unidadeId},
+      );
+      if (r is Map) {
+        return r.map(
+          (key, value) => MapEntry(key.toString(), (value as num?)?.toInt() ?? 0),
+        );
+      }
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202' && e.code != '42883') rethrow;
+    }
+    return {};
+  }
+
+  Future<void> cancelarPedidoComMotivo(int id, String motivo) async {
+    await _client.rpc(
+      'cancelar_pedido_com_motivo',
+      params: {'p_pedido_id': id, 'p_motivo': motivo},
+    );
+  }
+
   Future<void> updatePedidoStatus(int id, String status) async {
     // Transição validada pela máquina de estados do banco (trigger)
-    await _client.rpc('alterar_status_pedido', params: {
-      'p_pedido_id': id,
-      'p_status': status,
-    });
+    await _client.rpc(
+      'alterar_status_pedido',
+      params: {'p_pedido_id': id, 'p_status': status},
+    );
+  }
+
+  Future<Map<String, dynamic>?> fetchPedidoDetalhe(int id) async {
+    final r = await _client
+        .from('pedidos')
+        .select(
+          '*, pedido_itens(*, produtos!produto_id(nome, url_imagem, peso_kg, comprimento_cm, largura_cm, altura_cm)), '
+          'perfis!pedidos_user_id_fkey(nome, email, telefone, cpf), '
+          'unidades(id,nome,endereco,bairro,cidade,uf,cep,numero,complemento,'
+          'horario_seg,horario_ter,horario_qua,horario_qui,horario_sex,'
+          'horario_sab,horario_dom,prazo_retirada_min,prazo_entrega_min,'
+          'latitude,longitude,taxa_entrega,frete_gratis_acima,frete_modo,'
+          'frete_taxa_base,frete_valor_km,frete_km_minimo,frete_raio_max_km,'
+          'frete_fator_rota,frete_tempo_km_min,frete_peso_incluso_kg,'
+          'frete_valor_kg_extra), '
+          'pagamentos(*), envios(*, envio_eventos(*))',
+        )
+        .eq('id', id)
+        .maybeSingle();
+    return r == null ? null : (r as Map).cast<String, dynamic>();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchPedidoHistorico(int id) async {
+    final r = await _client
+        .from('pedido_historico')
+        .select('*, perfis(nome)')
+        .eq('pedido_id', id)
+        .order('criado_em', ascending: true);
+    if (r is! List) return [];
+    return r.cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchPedidoAuditoria(int id) async {
+    final r = await _client
+        .from('pedido_auditoria')
+        .select('*, perfis(nome)')
+        .eq('pedido_id', id)
+        .order('criado_em', ascending: false);
+    if (r is! List) return [];
+    return r.cast<Map<String, dynamic>>();
+  }
+
+  Future<int> confirmarPagamentoManual(int id, String motivo) async {
+    final r = await _client.rpc(
+      'confirmar_pagamento_manual',
+      params: {'p_pedido_id': id, 'p_motivo': motivo},
+    );
+    return (r as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> resolverRevisaoPagamento(
+    int pagamentoId,
+    String resolucao,
+  ) async {
+    await _client.rpc(
+      'resolver_revisao_pagamento',
+      params: {'p_pagamento_id': pagamentoId, 'p_resolucao': resolucao},
+    );
+  }
+
+  Future<void> atualizarRastreio(
+    int pedidoId,
+    String? codigo,
+    String? url,
+  ) async {
+    await _client.rpc(
+      'atualizar_rastreio',
+      params: {'p_pedido_id': pedidoId, 'p_codigo': codigo, 'p_url': url},
+    );
+  }
+
+  // ── ETIQUETAS / CORREIOS ────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> _invokeEtiqueta(
+    String acao,
+    int pedidoId, {
+    Map<String, dynamic> extra = const {},
+  }) async {
+    try {
+      final resposta = await _client.functions.invoke(
+        'frete-etiqueta',
+        body: {'acao': acao, 'pedido_id': pedidoId, ...extra},
+      );
+      final data = resposta.data;
+      if (data is Map) return data.cast<String, dynamic>();
+      return {};
+    } on FunctionException catch (e) {
+      final detalhe = e.details;
+      final mensagem = detalhe is Map
+          ? (detalhe['erro'] ?? detalhe['error'])
+          : null;
+      throw StateError(
+        mensagem?.toString() ??
+            'Não foi possível processar a etiqueta (${e.status}).',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> gerarEtiqueta(
+    int pedidoId, {
+    String layout = 'PADRAO',
+  }) {
+    return _invokeEtiqueta('gerar', pedidoId, extra: {'layout': layout});
+  }
+
+  Future<Map<String, dynamic>> imprimirEtiqueta(int pedidoId) {
+    return _invokeEtiqueta('imprimir', pedidoId);
+  }
+
+  Future<Map<String, dynamic>> cancelarEtiqueta(int pedidoId) {
+    return _invokeEtiqueta('cancelar', pedidoId);
+  }
+
+  Future<Map<String, dynamic>> sincronizarEnvio(int pedidoId) {
+    return _invokeEtiqueta('sincronizar', pedidoId);
+  }
+
+  Future<Map<String, dynamic>> simularEventoEnvio(int pedidoId, String status) {
+    return _invokeEtiqueta(
+      'simular_evento',
+      pedidoId,
+      extra: {'status': status},
+    );
+  }
+
+  Future<void> atualizarNotaFiscalPedido(
+    int pedidoId,
+    String? chave,
+    String? numero,
+  ) async {
+    await _client.rpc(
+      'atualizar_nota_fiscal_pedido',
+      params: {'p_pedido_id': pedidoId, 'p_chave': chave, 'p_numero': numero},
+    );
   }
 
   // ─── USUÁRIOS (seletores admin) ─────────────────
@@ -276,116 +465,5 @@ class AdminService {
 
   Future<void> deleteComentario(String id) async {
     await _client.from('post_comentarios').delete().eq('id', id);
-  }
-
-  // ─── AULAS ──────────────────────────────────────
-
-  Future<List<Map<String, dynamic>>> fetchAulasAdmin() async {
-    final r = await _client
-        .from('aulas')
-        .select('*, unidades(nome)')
-        .order('dia_semana')
-        .order('horario');
-    if (r is! List) return [];
-    return r.cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertAula(Map<String, dynamic> data) async {
-    await _client.from('aulas').insert(data);
-  }
-
-  Future<void> updateAula(int id, Map<String, dynamic> data) async {
-    await _client.from('aulas').update(data).eq('id', id);
-  }
-
-  Future<void> deleteAula(int id) async {
-    // Remove as inscrições da aula antes de excluir
-    try { await _client.from('aulas_inscricao').delete().eq('aula_id', id); } catch (_) {}
-    await _client.from('aulas').delete().eq('id', id);
-  }
-
-  // ─── DESAFIOS ───────────────────────────────────
-
-  Future<List<Map<String, dynamic>>> fetchDesafiosAdmin() async {
-    final r = await _client
-        .from('desafios')
-        .select('*, unidades(nome), desafios_participantes(user_id, progresso, perfis(nome))')
-        .order('id', ascending: false);
-    if (r is! List) return [];
-    return r.cast<Map<String, dynamic>>();
-  }
-
-  Future<void> insertDesafio(Map<String, dynamic> data) async {
-    await _client.from('desafios').insert(data);
-  }
-
-  Future<void> updateDesafio(int id, Map<String, dynamic> data) async {
-    await _client.from('desafios').update(data).eq('id', id);
-  }
-
-  Future<void> deleteDesafio(int id) async {
-    // Remove os participantes do desafio antes de excluir
-    try { await _client.from('desafios_participantes').delete().eq('desafio_id', id); } catch (_) {}
-    await _client.from('desafios').delete().eq('id', id);
-  }
-
-  // ─── PROFISSIONAIS / FILIAÇÕES ─────────────────────
-
-  static const List<String> cargosProfissionais = ['nutricionista', 'personal'];
-
-  Future<List<Map<String, dynamic>>> fetchProfissionais() async {
-    final r = await _client
-        .from('perfis')
-        .select('id, nome, email, funcao, unidade_id, avatar_url, unidades(nome)')
-        .inFilter('funcao', cargosProfissionais)
-        .order('nome');
-    if (r is! List) return [];
-    return r.cast<Map<String, dynamic>>();
-  }
-
-  /// Todas as filiações (para o admin ver tudo).
-  Future<List<Map<String, dynamic>>> fetchTodasFiliacoes() async {
-    final r = await _client
-        .from('perfis_unidades')
-        .select('*, unidades(nome, bairro, foto_url)')
-        .order('principal', ascending: false);
-    if (r is! List) return [];
-    return r.cast<Map<String, dynamic>>();
-  }
-
-  /// Filiações de um profissional (próprio usuário via RLS).
-  Future<List<Map<String, dynamic>>> fetchFiliacoesDoUsuario(String userId) async {
-    final r = await _client
-        .from('perfis_unidades')
-        .select('*, unidades(nome, bairro, foto_url, endereco)')
-        .eq('user_id', userId)
-        .order('principal', ascending: false);
-    if (r is! List) return [];
-    return r.cast<Map<String, dynamic>>();
-  }
-
-  /// Substitui as filiações do profissional e mantém perfis.unidade_id em sincronia
-  /// (personal: unidade única; nutricionista: unidade principal).
-  Future<void> salvarFiliacoes(String userId, String funcao, List<int> unidadeIds, int? principalId) async {
-    await _client.from('perfis_unidades').delete().eq('user_id', userId);
-    if (unidadeIds.isNotEmpty) {
-      await _client.from('perfis_unidades').insert(
-        unidadeIds.map((uid) => {
-          'user_id': userId,
-          'unidade_id': uid,
-          'principal': uid == principalId,
-        }).toList(),
-      );
-    }
-    final unidadeIdSync = principalId ?? (unidadeIds.isEmpty ? null : unidadeIds.first);
-    await _client.from('perfis')
-        .update({'funcao': funcao, 'unidade_id': unidadeIdSync})
-        .eq('id', userId);
-  }
-
-  /// Remove o profissional: apaga filiações e volta a função para usuário comum.
-  Future<void> removerProfissional(String userId) async {
-    await _client.from('perfis_unidades').delete().eq('user_id', userId);
-    await _client.from('perfis').update({'funcao': 'usuario', 'unidade_id': null}).eq('id', userId);
   }
 }

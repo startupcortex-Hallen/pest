@@ -8,7 +8,10 @@ class CartService {
   Future<List<CartItem>> fetchCart(String userId) async {
     final response = await _client
         .from('carrinho')
-        .select('*, produtos(nome, preco, preco_promocional, url_imagem, estoque, unidade_id, em_promocao)')
+        .select(
+          'id,user_id,produto_id,quantidade,cor,created_at,'
+          'produtos(nome,preco,preco_promocional,url_imagem,estoque,unidade_id,peso_kg,em_promocao,frete_gratis)',
+        )
         .eq('user_id', userId)
         .order('created_at', ascending: false);
 
@@ -27,7 +30,12 @@ class CartService {
     return response.length;
   }
 
-  Future<void> adicionar(String userId, int produtoId, {int quantidade = 1, String? cor}) async {
+  Future<void> adicionar(
+    String userId,
+    int produtoId, {
+    int quantidade = 1,
+    String? cor,
+  }) async {
     var query = _client
         .from('carrinho')
         .select('id, quantidade')

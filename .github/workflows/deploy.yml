@@ -23,7 +23,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.47.5
+          flutter-version: 3.41.7
           cache: true
 
       - name: Analyze (falha apenas em erros)
@@ -33,6 +33,10 @@ jobs:
       - name: Testes
         working-directory: o_pest_shop
         run: flutter test
+
+      - name: Gerar catálogo estático
+        working-directory: o_pest_shop
+        run: node scripts/gerar-catalogo.mjs
 
       - name: Build web
         working-directory: o_pest_shop
@@ -53,3 +57,48 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-cloudflare:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar credenciais Cloudflare
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Cloudflare Pages::Configure CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID para publicar em o-pest-shop.pages.dev."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.cloudflare.outputs.enabled == 'true'
+
+      - uses: subosito/flutter-action@v2
+        if: steps.cloudflare.outputs.enabled == 'true'
+        with:
+          channel: stable
+          flutter-version: 3.41.7
+          cache: true
+
+      - name: Gerar catálogo estático
+        if: steps.cloudflare.outputs.enabled == 'true'
+        working-directory: o_pest_shop
+        run: node scripts/gerar-catalogo.mjs
+
+      - name: Build web (raiz)
+        if: steps.cloudflare.outputs.enabled == 'true'
+        working-directory: o_pest_shop
+        run: flutter build web --release --base-href /
+
+      - name: Publicar no Cloudflare Pages
+        if: steps.cloudflare.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy o_pest_shop/build/web --project-name=o-pest-shop --branch=main

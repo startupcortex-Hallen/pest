@@ -15,6 +15,7 @@ import '../../../models/produto.dart';
 import '../../../models/feed_post.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/chat_service.dart';
+import '../../../services/produto_service.dart';
 import '../../widgets/feed_card.dart';
 import '../../widgets/featured_card.dart';
 import '../../widgets/animated_card_entry.dart';
@@ -59,16 +60,46 @@ class _UnidadeScreenState extends State<UnidadeScreen>
   Future<void> _load() async {
     final supabase = Supabase.instance.client;
     try {
-      final uni = await supabase.from('unidades').select().eq('id', widget.unidadeId).maybeSingle();
+      final uni = await supabase
+          .from('unidades_publicas')
+          .select(
+            'id,nome,bairro,cidade,endereco,numero,complemento,uf,cep,'
+            'distancia,foto_url,logo_url,latitude,longitude,'
+            'horario_seg,horario_ter,horario_qua,horario_qui,horario_sex,'
+            'horario_sab,horario_dom,prazo_retirada_min,prazo_entrega_min',
+          )
+          .eq('id', widget.unidadeId)
+          .maybeSingle();
       if (uni != null) {
         _unidade = uni as Map<String, dynamic>;
       }
 
-      final prods = await supabase.from('produtos').select('*, categorias(nome), marcas(nome), unidades(nome)').eq('unidade_id', widget.unidadeId).order('id');
-      if (prods is List) _produtos = prods.map((j) => Produto.fromJson(j as Map<String, dynamic>)).toList();
+      final prods = await supabase
+          .from('produtos_publicos')
+          .select(ProdutoService.publicColumns)
+          .eq('unidade_id', widget.unidadeId)
+          .order('id')
+          .limit(100);
+      if (prods is List) {
+        _produtos = prods
+            .map((j) => Produto.fromJson(j as Map<String, dynamic>))
+            .toList(growable: false);
+      }
 
-      final posts = await supabase.from('posts_feed').select('*, post_likes(user_id), unidades(nome)').eq('unidade_id', widget.unidadeId).order('created_at', ascending: false);
-      if (posts is List) _posts = posts.map((j) => FeedPost.fromJson(j as Map<String, dynamic>)).toList();
+      final posts = await supabase
+          .from('posts_feed')
+          .select(
+            'id,user_id,titulo,descricao,url_imagem,url_youtube,categoria,'
+            'created_at,unidade_id,post_likes(user_id),unidades(nome)',
+          )
+          .eq('unidade_id', widget.unidadeId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      if (posts is List) {
+        _posts = posts
+            .map((j) => FeedPost.fromJson(j as Map<String, dynamic>))
+            .toList(growable: false);
+      }
     } catch (e) {
       debugPrint('Erro ao carregar unidade: $e');
     }

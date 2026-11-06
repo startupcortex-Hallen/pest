@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/helpers/cartao.dart';
 import '../../../core/helpers/cpf.dart';
+import '../../../core/helpers/endereco_pagbank.dart';
 import '../../../core/helpers/pagbank_js.dart';
 import '../../../core/helpers/pedido_status.dart';
 import '../../../core/helpers/theme_colors.dart';
@@ -14,6 +17,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../models/cartao_credito.dart';
 import '../../../models/pagamento.dart';
+import '../../../providers/app_config_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/cartao_provider.dart';
 import '../../../services/checkout_service.dart';
@@ -34,7 +38,8 @@ class PagamentoScreen extends StatefulWidget {
   State<PagamentoScreen> createState() => _PagamentoScreenState();
 }
 
-class _PagamentoScreenState extends State<PagamentoScreen> {
+class _PagamentoScreenState extends State<PagamentoScreen>
+    with WidgetsBindingObserver {
   final _service = PagamentoService();
 
   String _metodo = 'pix';
@@ -43,6 +48,8 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
   String? _erro;
   Timer? _poll;
   Timer? _contagem;
+  int _pollTick = 0;
+  bool _pollEmAndamento = false;
   Duration _restante = Duration.zero;
 
   bool _pixCopiado = false;
@@ -58,12 +65,15 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
   bool _salvarCartao = false;
   int _parcelas = 1;
   int? _cartaoSalvoId;
+  EnderecoPagbank? _endereco3ds;
+  bool _simulacaoDisponivel = false;
 
   static const _opcoesParcelas = [1, 2, 3, 4, 5, 6, 10, 12];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       final cpf = auth.user?.cpf ?? '';
@@ -71,11 +81,13 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
       final nome = auth.user?.nome ?? '';
       if (nome.isNotEmpty) _nomeCtrl.text = nome;
       context.read<CartaoProvider>().loadCartoes();
+      _carregarSimulacao();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _contagem?.cancel();
     _numeroCtrl.dispose();
@@ -91,10 +103,28 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
 
   String _somenteDigitos(String v) => v.replaceAll(RegExp(r'[^0-9]'), '');
 
+  Future<void> _carregarSimulacao() async {
+    final disponivel = await _service.simulacaoDisponivel();
+    if (mounted) setState(() => _simulacaoDisponivel = disponivel);
+  }
+
   // ─── Criação da cobrança ─────────────────────────────────────
 
   Future<void> _gerarCobranca() async {
     if (_processando) return;
+
+    final config = context.read<AppConfigProvider>();
+    if (!config.pagamentosAtivo) {
+      setState(() => _erro =
+          'Os pagamentos estão temporariamente indisponíveis. Tente novamente em instantes.');
+      return;
+    }
+    if (config.pixOnly && _metodo != 'pix') {
+      setState(() => _erro =
+          'No momento estamos aceitando apenas PIX. Selecione PIX para continuar.');
+      return;
+    }
+
     setState(() {
       _processando = true;
       _erro = null;
@@ -134,6 +164,88 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
     } finally {
       if (mounted) setState(() => _processando = false);
     }
+  }
+
+  Future<void> _simularPagamento() async {
+    if (_processando) return;
+    setState(() {
+      _processando = true;
+      _erro = null;
+    });
+    try {
+      Map<String, dynamic>? cartao;
+      if (_metodo == 'credito' || _metodo == 'debito') {
+        cartao = await _dadosCartaoSimulados();
+      }
+      final pagamento = await _service.simular(
+        pedidoIds: _pedidoIds,
+        metodo: _metodo,
+        parcelas: _metodo == 'credito' ? _parcelas : 1,
+        cartao: cartao,
+      );
+      if (!mounted) return;
+      setState(() => _pagamento = pagamento);
+      if (pagamento.pago) {
+        _aoConfirmarPagamento();
+      } else {
+        _iniciarAcompanhamento();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() =>
+            _erro = e is StateError ? e.message : 'Não foi possível simular o pagamento.');
+      }
+    } finally {
+      if (mounted) setState(() => _processando = false);
+    }
+  }
+
+  Future<Map<String, dynamic>> _dadosCartaoSimulados() async {
+    final cartoes = context.read<CartaoProvider>().cartoes;
+    if (_metodo == 'credito' && _cartaoSalvoId != null) {
+      final cartao = cartoes.firstWhere((c) => c.id == _cartaoSalvoId);
+      final cvv = _somenteDigitos(_cvvSalvoCtrl.text);
+      if (cvv.length < 3) throw StateError('Informe o CVV do cartão salvo.');
+      final digitos = _somenteDigitos(cartao.numeroMascarado);
+      return {
+        'holder_nome': cartao.titular,
+        'last4': digitos.length >= 4 ? digitos.substring(digitos.length - 4) : '4242',
+        'bandeira': cartao.bandeira.isEmpty ? 'Cartão' : cartao.bandeira,
+        'parcelas': _parcelas,
+        'simulado': true,
+      };
+    }
+
+    final numero = _somenteDigitos(_numeroCtrl.text);
+    final nome = _nomeCtrl.text.trim();
+    final cpf = _somenteDigitos(_cpfCtrl.text);
+    final validade = _somenteDigitos(_validadeCtrl.text);
+    final cvv = _somenteDigitos(_cvvCtrl.text);
+
+    if (numero.length < 13 || !luhnValido(numero)) {
+      throw StateError('Número do cartão inválido.');
+    }
+    if (nome.split(' ').where((p) => p.trim().length >= 2).length < 2) {
+      throw StateError('Informe o nome completo do titular.');
+    }
+    if (!cpfValido(cpf)) throw StateError('CPF do titular inválido.');
+    if (validade.length != 4) throw StateError('Validade inválida (use MMAA).');
+
+    final mes = int.tryParse(validade.substring(0, 2)) ?? 0;
+    final ano = 2000 + (int.tryParse(validade.substring(2)) ?? 0);
+    final agora = DateTime.now();
+    if (mes < 1 || mes > 12 || ano < agora.year || (ano == agora.year && mes < agora.month)) {
+      throw StateError('Cartão vencido ou validade inválida.');
+    }
+    if (cvv.length < 3 || cvv.length > 4) throw StateError('CVV inválido.');
+
+    return {
+      'holder_nome': nome,
+      'last4': numero.substring(numero.length - 4),
+      'bandeira': bandeiraCartao(numero),
+      'parcelas': _metodo == 'credito' ? _parcelas : 1,
+      'simulado': true,
+    };
   }
 
   /// Valida os dados, roda o 3DS (obrigatório em crédito e débito) e
@@ -226,6 +338,60 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
     );
   }
 
+  /// Endereço real do portador (entrega do pedido ou endereço salvo).
+  /// Nunca usa endereço fictício: é isso que o antifraude do banco compara.
+  Future<EnderecoPagbank> _enderecoPara3ds() async {
+    if (_endereco3ds != null) return _endereco3ds!;
+
+    final userId = context.read<AuthProvider>().user?.id;
+    if (userId == null) throw StateError('Faça login para continuar.');
+
+    final client = Supabase.instance.client;
+    Map<String, dynamic>? pedido;
+    Map<String, dynamic>? salvo;
+
+    try {
+      final resp = await client
+          .from('pedidos')
+          .select('tipo_entrega, endereco_entrega, cep_entrega, unidades(nome, endereco, bairro, cidade)')
+          .inFilter('id', _pedidoIds)
+          .limit(1)
+          .maybeSingle();
+      if (resp != null) pedido = Map<String, dynamic>.from(resp);
+    } catch (_) {
+      // Sem pedido legível: tenta o endereço salvo abaixo.
+    }
+
+    try {
+      final resp = await client
+          .from('enderecos_usuario')
+          .select('*')
+          .eq('user_id', userId)
+          .order('principal', ascending: false)
+          .limit(1);
+      if (resp is List && resp.isNotEmpty) {
+        salvo = Map<String, dynamic>.from(resp.first as Map);
+      }
+    } catch (_) {
+      // Tabela pode não existir em bases antigas; o endereço do pedido basta.
+    }
+
+    final endereco = EnderecoPagbank.dePedido(
+      pedido ?? const <String, dynamic>{},
+      enderecoSalvo: salvo,
+    );
+    if (endereco == null || !endereco.completo) {
+      throw StateError(
+        'Cadastre um endereço completo (rua, número, cidade, UF e CEP) para '
+        'pagar com cartão. Se a compra for retirada, salve um endereço em '
+        'Meus Endereços.',
+      );
+    }
+
+    _endereco3ds = endereco;
+    return endereco;
+  }
+
   Future<String> _autenticar3ds({
     required String tipo,
     String? numero,
@@ -234,6 +400,7 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
     String? nome,
     String? cardId,
   }) async {
+    final endereco = await _enderecoPara3ds();
     final sessao = await _service.sessao3ds();
     final auth = context.read<AuthProvider>().user;
     final telefone = _somenteDigitos(auth?.telefone ?? '');
@@ -272,8 +439,8 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
           'value': (widget.total * 100).round(),
           'currency': 'BRL',
         },
-        'billingAddress': _enderecoPadrao3ds(),
-        'shippingAddress': _enderecoPadrao3ds(),
+        'billingAddress': endereco.toJson3ds(),
+        'shippingAddress': endereco.toJson3ds(),
         'dataOnly': false,
       },
     };
@@ -301,47 +468,79 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
     throw StateError('Não foi possível autenticar o cartão (3DS). Tente novamente.');
   }
 
-  Map<String, dynamic> _enderecoPadrao3ds() => {
-        'street': 'Av. Paulista',
-        'number': '1000',
-        'complement': '',
-        'regionCode': 'SP',
-        'country': 'BRA',
-        'city': 'São Paulo',
-        'postalCode': '01310100',
-      };
-
   // ─── Acompanhamento do status (webhook + polling) ────────────
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _poll?.cancel();
+      _contagem?.cancel();
+      return;
+    }
+    if (state == AppLifecycleState.resumed &&
+        mounted &&
+        _pagamento?.pendente == true) {
+      _iniciarAcompanhamento();
+    }
+  }
 
   void _iniciarAcompanhamento() {
     _poll?.cancel();
     _contagem?.cancel();
+    _pollTick = 0;
 
     final expira = _pagamento?.expiraEm;
     if (expira != null) {
       _restante = expira.difference(DateTime.now());
       _contagem = Timer.periodic(const Duration(seconds: 1), (_) {
         final restante = expira.difference(DateTime.now());
-        if (mounted) setState(() => _restante = restante.isNegative ? Duration.zero : restante);
+        if (mounted) {
+          setState(() =>
+              _restante = restante.isNegative ? Duration.zero : restante);
+        }
       });
     }
 
     if (_pagamento == null || !_pagamento!.pendente) return;
-    _poll = Timer.periodic(const Duration(seconds: 5), (_) async {
+
+    // O webhook é a fonte principal. A cada 20s lemos o status já persistido
+    // no banco; só de 60 em 60s chamamos a Edge que sincroniza com o PagBank.
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) async {
       final atual = _pagamento;
-      if (atual == null || !atual.pendente) return;
+      if (atual == null || !atual.pendente || _pollEmAndamento) return;
+      _pollEmAndamento = true;
+      _pollTick++;
+
       try {
-        final atualizado = await _service.consultar(atual.id);
-        if (!mounted) return;
-        setState(() => _pagamento = atualizado);
-        if (atualizado.pago) {
+        if (_pollTick % 3 == 0) {
+          final sincronizado = await _service.consultar(atual.id);
+          if (!mounted) return;
+          setState(() => _pagamento = sincronizado);
+          if (sincronizado.pago) {
+            _aoConfirmarPagamento();
+            return;
+          }
+          if (sincronizado.recusado || sincronizado.expirado) {
+            _poll?.cancel();
+            _contagem?.cancel();
+            return;
+          }
+        }
+
+        final local = await _service.statusLocal(atual.id);
+        if (!mounted || local == null) return;
+        setState(() => _pagamento = local);
+        if (local.pago) {
           _aoConfirmarPagamento();
-        } else if (atualizado.recusado || atualizado.expirado) {
+        } else if (local.recusado || local.expirado) {
           _poll?.cancel();
           _contagem?.cancel();
         }
       } catch (_) {
-        // silencioso — tenta no próximo ciclo
+        // silencioso - tenta no próximo ciclo
+      } finally {
+        _pollEmAndamento = false;
       }
     });
   }
@@ -448,7 +647,91 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
   }
 
   List<Widget> _buildEscolha() {
+    final auth = context.watch<AuthProvider>();
+    final cpf = _somenteDigitos(auth.user?.cpf ?? '');
+    final nome = auth.user?.nome ?? '';
+    final telefone = _somenteDigitos(auth.user?.telefone ?? '');
+    final perfilPagamentoOk = cpfValido(cpf) &&
+        nome.split(' ').where((p) => p.trim().length >= 2).length >= 2 &&
+        telefone.length >= 10;
+
     return [
+      if (_simulacaoDisponivel) ...[
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2D65F6).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2D65F6).withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.science_rounded, size: 20, color: Color(0xFF2D65F6)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Modo simulação ativo: nenhuma cobrança real será feita. '
+                  'Use este botão para testar o pedido, estoque e comprovante.',
+                  style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+      if (!perfilPagamentoOk) ...[
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2A33C).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFF2A33C).withValues(alpha: 0.4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.badge_outlined, size: 18, color: Color(0xFFF2A33C)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Complete seu cadastro para pagar',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'O PagBank exige nome completo, CPF e telefone em todos os pedidos, inclusive no PIX. '
+                'Cadastre no perfil antes de gerar a cobrança.',
+                style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context)),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () async {
+                    await context.push('/editar-dados');
+                    if (mounted) {
+                      await context.read<AuthProvider>().refreshProfile();
+                    }
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFF2A33C),
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('Completar cadastro', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
       Row(
         children: [
           Expanded(child: _metodoCard('pix', Icons.qr_code_2_rounded, 'PIX', 'Aprovação na hora')),
@@ -465,21 +748,24 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
         ],
       ),
       const SizedBox(height: AppSpacing.lg),
-      if (_metodo == 'credito') _buildCartaoSection(permiteSalvar: true),
+      if (_metodo == 'credito')
+        _buildCartaoSection(permiteSalvar: !_simulacaoDisponivel),
       if (_metodo == 'debito') ...[
         _buildCartaoSection(permiteSalvar: false),
-        const SizedBox(height: 8),
-        Text(
-          'Para sua segurança, todo pagamento com cartão passa pela autenticação 3DS do seu banco — uma janela de confirmação será aberta.',
-          style: TextStyle(fontSize: 11, color: ThemeColors.hint(context)),
-        ),
+        if (!_simulacaoDisponivel) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Para sua segurança, todo pagamento com cartão passa pela autenticação 3DS do seu banco — uma janela de confirmação será aberta.',
+            style: TextStyle(fontSize: 11, color: ThemeColors.hint(context)),
+          ),
+        ],
       ],
-      if (_metodo == 'pix')
+      if (!_simulacaoDisponivel && _metodo == 'pix')
         _buildAviso(
           Icons.qr_code_2_rounded,
           'O QR Code é gerado na hora e vale por 30 minutos. A confirmação é automática após o pagamento.',
         ),
-      if (_metodo == 'boleto')
+      if (!_simulacaoDisponivel && _metodo == 'boleto')
         _buildAviso(
           Icons.receipt_rounded,
           'O boleto é registrado na hora e vence em 3 dias. O pedido é liberado após a compensação bancária (1 a 2 dias úteis).',
@@ -508,16 +794,20 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
       SizedBox(
         height: 52,
         child: ElevatedButton.icon(
-          onPressed: _processando ? null : _gerarCobranca,
+          onPressed: (_processando || !perfilPagamentoOk)
+              ? null
+              : (_simulacaoDisponivel ? _simularPagamento : _gerarCobranca),
           icon: _processando
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : const Icon(Icons.lock_rounded, size: 20),
+              : Icon(_simulacaoDisponivel ? Icons.science_rounded : Icons.lock_rounded, size: 20),
           label: Text(
-            _rotuloBotao(),
+            _simulacaoDisponivel
+                ? 'Simular pagamento aprovado (${_rotuloMetodoCurto()})'
+                : _rotuloBotao(),
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
           style: ElevatedButton.styleFrom(
@@ -538,6 +828,21 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
     ];
   }
 
+  String _rotuloMetodoCurto() {
+    switch (_metodo) {
+      case 'pix':
+        return 'PIX';
+      case 'credito':
+        return 'crédito';
+      case 'debito':
+        return 'débito';
+      case 'boleto':
+        return 'boleto';
+      default:
+        return _metodo;
+    }
+  }
+
   String _rotuloBotao() {
     switch (_metodo) {
       case 'pix':
@@ -555,8 +860,9 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
 
   Widget _metodoCard(String metodo, IconData icon, String titulo, String subtitulo) {
     final sel = _metodo == metodo;
-    final indisponivel =
-        (metodo == 'credito' || metodo == 'debito') && !PagBankJs.disponivel;
+    final indisponivel = (metodo == 'credito' || metodo == 'debito') &&
+        !PagBankJs.disponivel &&
+        !_simulacaoDisponivel;
     return GestureDetector(
       onTap: _processando
           ? null
@@ -1156,9 +1462,7 @@ class _PagamentoScreenState extends State<PagamentoScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          p.metodo == 'boleto'
-              ? 'Boleto registrado! O pedido será liberado após a compensação.'
-              : 'Seu pedido já está sendo processado pela loja.',
+          'Seu pedido já está sendo processado pela loja.',
           textAlign: TextAlign.center,
           style: TextStyle(color: ThemeColors.secondaryText(context), fontSize: 13),
         ),

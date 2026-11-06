@@ -14,6 +14,8 @@ class FeedProvider extends ChangeNotifier {
   List<FeedPost> _filtered = [];
   String? _selectedCategoria;
   bool _loading = false;
+  DateTime? _lastLoaded;
+  static const Duration _staleAfter = Duration(seconds: 60);
 
   List<FeedPost> get feed => _selectedCategoria == null ? _posts : _filtered;
   List<String> get categorias => _categorias;
@@ -21,7 +23,19 @@ class FeedProvider extends ChangeNotifier {
   bool get loading => _loading;
   String? get userId => _authService.currentUser?.id;
 
-  Future<void> loadFeed() async {
+  Future<void> loadIfStale() async {
+    if (_lastLoaded == null ||
+        DateTime.now().difference(_lastLoaded!) >= _staleAfter) {
+      await loadFeed();
+    }
+  }
+
+  Future<void> loadFeed({bool force = false}) async {
+    if (!force &&
+        _lastLoaded != null &&
+        DateTime.now().difference(_lastLoaded!) < _staleAfter) {
+      return;
+    }
     _loading = true;
     notifyListeners();
 
@@ -39,6 +53,7 @@ class FeedProvider extends ChangeNotifier {
     }
 
     _aplicarFiltro();
+    _lastLoaded = DateTime.now();
     _loading = false;
     notifyListeners();
   }

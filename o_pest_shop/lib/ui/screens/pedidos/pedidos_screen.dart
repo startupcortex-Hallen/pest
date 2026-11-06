@@ -42,16 +42,20 @@ class _PedidosScreenState extends State<PedidosScreen> {
         await Supabase.instance.client.rpc('cancelar_pendentes_expirados');
       } catch (_) {}
       final response = await Supabase.instance.client
-        .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)')
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        .range(0, _pageSize - 1);
+          .from('pedidos')
+          .select(
+            '*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)',
+          )
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .range(0, _pageSize - 1);
       if (response is List) {
         _pedidos = response.cast<Map<String, dynamic>>();
         _temMais = _pedidos.length == _pageSize;
       }
-    } catch (e) { debugPrint('Erro pedidos: $e'); }
+    } catch (e) {
+      debugPrint('Erro pedidos: $e');
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -62,11 +66,13 @@ class _PedidosScreenState extends State<PedidosScreen> {
     try {
       final inicio = (_pagina + 1) * _pageSize;
       final response = await Supabase.instance.client
-        .from('pedidos')
-        .select('*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)')
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        .range(inicio, inicio + _pageSize - 1);
+          .from('pedidos')
+          .select(
+            '*, pedido_itens(*, produtos!produto_id(nome, url_imagem)), unidades(nome, cidade, endereco, bairro, horario_seg, horario_ter, horario_qua, horario_qui, horario_sex, horario_sab, horario_dom, prazo_retirada_min, prazo_entrega_min)',
+          )
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .range(inicio, inicio + _pageSize - 1);
       if (response is List) {
         final novos = response.cast<Map<String, dynamic>>();
         if (novos.isEmpty) {
@@ -78,7 +84,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
           _temMais = novos.length == _pageSize;
         }
       }
-    } catch (e) { debugPrint('Erro carregar mais: $e'); }
+    } catch (e) {
+      debugPrint('Erro carregar mais: $e');
+    }
     if (mounted) setState(() => _carregandoMais = false);
   }
 
@@ -87,14 +95,26 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   IconData _iconeStatus(String status) {
     switch (status) {
-      case 'pendente': return Icons.schedule_rounded;
-      case 'pago': return Icons.payments_rounded;
-      case 'em_preparo': return Icons.local_dining_rounded;
-      case 'pronto_para_entrega': return Icons.inventory_2_rounded;
-      case 'saiu_para_entrega': return Icons.delivery_dining_rounded;
-      case 'entregue': return Icons.check_circle_rounded;
-      case 'cancelado': return Icons.cancel_rounded;
-      default: return Icons.receipt_rounded;
+      case 'pendente':
+        return Icons.schedule_rounded;
+      case 'pago':
+        return Icons.payments_rounded;
+      case 'em_preparo':
+        return Icons.local_dining_rounded;
+      case 'pronto_para_entrega':
+        return Icons.inventory_2_rounded;
+      case 'postado':
+        return Icons.local_post_office_rounded;
+      case 'em_transito':
+        return Icons.local_shipping_rounded;
+      case 'saiu_para_entrega':
+        return Icons.delivery_dining_rounded;
+      case 'entregue':
+        return Icons.check_circle_rounded;
+      case 'cancelado':
+        return Icons.cancel_rounded;
+      default:
+        return Icons.receipt_rounded;
     }
   }
 
@@ -117,8 +137,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
         title: const Text('Meus Pedidos'),
       ),
       body: _loading
-        ? const Center(child: CircularProgressIndicator())
-        : _pedidos.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : _pedidos.isEmpty
           ? const Center(child: Text('Nenhum pedido ainda'))
           : RefreshIndicator(
               onRefresh: _carregar,
@@ -145,16 +165,19 @@ class _PedidosScreenState extends State<PedidosScreen> {
                   final unidade = p['unidades'] as Map<String, dynamic>?;
                   final status = p['status'] as String? ?? 'pendente';
                   final cor = corStatusPedido(status);
+                  final etapas = etapasTimelinePara(p);
+                  final idxEtapa = indiceEtapaEm(status, etapas);
                   final itens = _itensDe(p);
                   return AnimatedCardEntry(
                     index: i,
                     child: GestureDetector(
                       onTap: () async {
-                        final resultado = await Navigator.of(context).push<bool>(
-                          MaterialPageRoute(
-                            builder: (_) => PedidoDetailScreen(pedido: p),
-                          ),
-                        );
+                        final resultado = await Navigator.of(context)
+                            .push<bool>(
+                              MaterialPageRoute(
+                                builder: (_) => PedidoDetailScreen(pedido: p),
+                              ),
+                            );
                         if (resultado == true) _carregar();
                       },
                       child: Container(
@@ -170,29 +193,50 @@ class _PedidosScreenState extends State<PedidosScreen> {
                             Row(
                               children: [
                                 Container(
-                                  width: 42, height: 42,
+                                  width: 42,
+                                  height: 42,
                                   decoration: BoxDecoration(
                                     color: cor.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: Icon(Icons.receipt_rounded, color: cor, size: 22),
+                                  child: Icon(
+                                    Icons.receipt_rounded,
+                                    color: cor,
+                                    size: 22,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text('Pedido #${p['id']}',
-                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                                       Text(
-                                        formatarDataHora(p['created_at'] as String?),
-                                        style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context)),
+                                        'Pedido #${p['id']}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      Text(
+                                        formatarDataHora(
+                                          p['created_at'] as String?,
+                                        ),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: ThemeColors.secondaryText(
+                                            context,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: cor.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(6),
@@ -200,11 +244,19 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(_iconeStatus(status), size: 12, color: cor),
+                                      Icon(
+                                        _iconeStatus(status),
+                                        size: 12,
+                                        color: cor,
+                                      ),
                                       const SizedBox(width: 4),
                                       Text(
                                         rotuloStatusCurto(status).toUpperCase(),
-                                        style: TextStyle(fontSize: 9, color: cor, fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: cor,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -215,17 +267,20 @@ class _PedidosScreenState extends State<PedidosScreen> {
                             if (status != 'cancelado') ...[
                               const SizedBox(height: 10),
                               Row(
-                                children: List.generate(etapasTimeline.length, (i) {
-                                  final idx = indiceEtapa(status);
-                                  final done = i <= idx;
+                                children: List.generate(etapas.length, (i) {
+                                  final done = i <= idxEtapa;
                                   return Expanded(
                                     child: Container(
                                       height: 4,
-                                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 2,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: done
-                                            ? corStatusPedido(etapasTimeline[i])
-                                            : ThemeColors.surfaceVariant(context),
+                                            ? corStatusPedido(etapas[i])
+                                            : ThemeColors.surfaceVariant(
+                                                context,
+                                              ),
                                         borderRadius: BorderRadius.circular(2),
                                       ),
                                     ),
@@ -240,12 +295,15 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                 child: ListView(
                                   scrollDirection: Axis.horizontal,
                                   children: itens.map((i) {
-                                    final prod = i['produtos'] is Map ? (i['produtos'] as Map) : null;
+                                    final prod = i['produtos'] is Map
+                                        ? (i['produtos'] as Map)
+                                        : null;
                                     final rawImg = prod?['url_imagem'];
                                     String? img;
                                     if (rawImg is List && rawImg.isNotEmpty) {
                                       img = rawImg.first.toString();
-                                    } else if (rawImg is String && rawImg.isNotEmpty) {
+                                    } else if (rawImg is String &&
+                                        rawImg.isNotEmpty) {
                                       img = rawImg;
                                     }
                                     final qtd = i['quantidade'] as int? ?? 1;
@@ -254,7 +312,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                       child: Row(
                                         children: [
                                           ClipRRect(
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
                                             child: SizedBox(
                                               width: 48,
                                               height: 48,
@@ -262,31 +322,89 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                                   ? CachedNetworkImage(
                                                       imageUrl: img,
                                                       fit: BoxFit.cover,
-                                                      errorWidget: (_, __, ___) => Container(
-                                                          color: ThemeColors.surfaceVariant(context),
-                                                          child: Icon(Icons.image_outlined, size: 20, color: ThemeColors.hint(context))),
+                                                      errorWidget:
+                                                          (
+                                                            _,
+                                                            __,
+                                                            ___,
+                                                          ) => Container(
+                                                            color:
+                                                                ThemeColors.surfaceVariant(
+                                                                  context,
+                                                                ),
+                                                            child: Icon(
+                                                              Icons
+                                                                  .image_outlined,
+                                                              size: 20,
+                                                              color:
+                                                                  ThemeColors.hint(
+                                                                    context,
+                                                                  ),
+                                                            ),
+                                                          ),
                                                     )
                                                   : Container(
-                                                      color: ThemeColors.surfaceVariant(context),
-                                                      child: Icon(Icons.image_outlined, size: 20, color: ThemeColors.hint(context))),
+                                                      color:
+                                                          ThemeColors.surfaceVariant(
+                                                            context,
+                                                          ),
+                                                      child: Icon(
+                                                        Icons.image_outlined,
+                                                        size: 20,
+                                                        color: ThemeColors.hint(
+                                                          context,
+                                                        ),
+                                                      ),
+                                                    ),
                                             ),
                                           ),
                                           const SizedBox(width: 6),
                                           ConstrainedBox(
-                                            constraints: const BoxConstraints(maxWidth: 110),
+                                            constraints: const BoxConstraints(
+                                              maxWidth: 110,
+                                            ),
                                             child: Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
-                                                Text(prod?['nome'] as String? ?? 'Produto',
-                                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis),
-                                                if (i['cor'] != null && (i['cor'] as String).isNotEmpty)
-                                                  Text('Cor: ${i['cor']}',
-                                                      style: TextStyle(fontSize: 9, color: ThemeColors.primary(context), fontWeight: FontWeight.w600)),
-                                                Text('$qtd x',
-                                                    style: TextStyle(fontSize: 10, color: ThemeColors.secondaryText(context))),
+                                                Text(
+                                                  prod?['nome'] as String? ??
+                                                      'Produto',
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                                if (i['cor'] != null &&
+                                                    (i['cor'] as String)
+                                                        .isNotEmpty)
+                                                  Text(
+                                                    'Cor: ${i['cor']}',
+                                                    style: TextStyle(
+                                                      fontSize: 9,
+                                                      color:
+                                                          ThemeColors.primary(
+                                                            context,
+                                                          ),
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                Text(
+                                                  '$qtd x',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color:
+                                                        ThemeColors.secondaryText(
+                                                          context,
+                                                        ),
+                                                  ),
+                                                ),
                                               ],
                                             ),
                                           ),
@@ -304,13 +422,21 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                 Expanded(
                                   child: Text(
                                     '${unidade?['nome'] ?? ''}  •  ${itens.length} ${itens.length == 1 ? 'item' : 'itens'}',
-                                    style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context)),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: ThemeColors.secondaryText(context),
+                                    ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                Text('R\$ ${(p['total'] as num?)?.toStringAsFixed(2) ?? '0,00'}',
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                                Text(
+                                  'R\$ ${(p['total'] as num?)?.toStringAsFixed(2) ?? '0,00'}',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ],
                             ),
                           ],

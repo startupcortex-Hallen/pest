@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
+import 'providers/app_config_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cart_provider.dart';
 import 'providers/cartao_provider.dart';
@@ -14,6 +15,8 @@ import 'router/app_router.dart';
 import 'services/auth_service.dart';
 import 'services/cart_service.dart';
 import 'services/cartao_service.dart';
+import 'services/app_config_service.dart';
+import 'services/catalogo_service.dart';
 import 'services/cupom_service.dart';
 import 'services/favorito_service.dart';
 import 'services/feed_service.dart';
@@ -30,10 +33,13 @@ class App extends StatelessWidget {
           create: (_) => ThemeProvider(),
         ),
         ChangeNotifierProvider(
+          create: (_) => AppConfigProvider(AppConfigService())..load(),
+        ),
+        ChangeNotifierProvider(
           create: (_) => AuthProvider(AuthService()),
         ),
         ChangeNotifierProvider(
-          create: (_) => HomeProvider(ProdutoService()),
+          create: (_) => HomeProvider(ProdutoService(), CatalogoService()),
         ),
         ChangeNotifierProvider(
           create: (_) => FavoritoProvider(FavoritoService(), AuthService()),

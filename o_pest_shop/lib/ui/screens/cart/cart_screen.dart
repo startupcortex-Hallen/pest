@@ -1,4 +1,5 @@
-﻿import 'dart:convert';
+import 'dart:async';
+import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -11,11 +12,14 @@ import '../../../core/helpers/theme_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../models/cart_item.dart';
 import '../../../models/endereco.dart';
+import '../../../models/frete.dart';
+import '../../../providers/app_config_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../providers/cupom_provider.dart';
 import '../../../services/checkout_service.dart';
 import '../../../services/endereco_service.dart';
+import '../../../services/frete_service.dart';
 import '../../widgets/animated_card_entry.dart';
 import '../../widgets/app_states.dart';
 import '../pedidos/pagamento_screen.dart';
@@ -43,14 +47,27 @@ class _CartScreenState extends State<CartScreen> {
   bool _aplicandoCupom = false;
   bool _finalizando = false;
   bool _buscandoCep = false;
+  String? _checkoutKey;
+  String? _checkoutKeyAssinatura;
+  Timer? _cepTimer;
   String _tipoEntrega = 'retirada';
 
   final _enderecoService = EnderecoService();
+  final _freteService = FreteService();
   List<Endereco> _enderecos = [];
   Map<int, double> _taxaUnidades = {};
   Map<int, double?> _freteGratisAcima = {};
+  Map<int, UnidadeFreteConfig> _unidadesFrete = {};
+  Map<int, FreteResultado> _freteResultados = {};
   final Set<int> _taxasCarregadas = {};
   bool _carregandoTaxas = false;
+  bool _calculandoFrete = false;
+  bool _buscandoCoordenadas = false;
+  double? _latitudeEntrega;
+  double? _longitudeEntrega;
+  String? _coordenadasFonte;
+  int? _enderecoSelecionadoId;
+  String? _freteErro;
 
   @override
   void initState() {
@@ -64,6 +81,7 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   void dispose() {
+    _cepTimer?.cancel();
     _cupomCtrl.dispose();
     _cepCtrl.dispose();
     _ruaCtrl.dispose();
@@ -75,23 +93,42 @@ class _CartScreenState extends State<CartScreen> {
     super.dispose();
   }
 
+  void _onCepChanged(String value) {
+    setState(_invalidarFrete);
+    _cepTimer?.cancel();
+    final cep = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length == 8) {
+      _cepTimer = Timer(const Duration(milliseconds: 500), () {
+        if (mounted) _buscarCep();
+      });
+    }
+  }
+
   /// Busca o CEP no ViaCEP (grátis, sem chave) e preenche os campos.
   Future<void> _buscarCep() async {
     final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (cep.length != 8) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Digite um CEP válido com 8 dígitos.'), backgroundColor: AppColors.error),
+        const SnackBar(
+          content: Text('Digite um CEP válido com 8 dígitos.'),
+          backgroundColor: AppColors.error,
+        ),
       );
       return;
     }
     setState(() => _buscandoCep = true);
     try {
-      final res = await http.get(Uri.parse('https://viacep.com.br/ws/$cep/json/'));
+      final res = await http.get(
+        Uri.parse('https://viacep.com.br/ws/$cep/json/'),
+      );
       final json = jsonDecode(utf8.decode(res.bodyBytes));
       if (json is Map && json['erro'] == true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CEP não encontrado.'), backgroundColor: AppColors.error),
+            const SnackBar(
+              content: Text('CEP não encontrado.'),
+              backgroundColor: AppColors.error,
+            ),
           );
         }
         return;
@@ -103,12 +140,22 @@ class _CartScreenState extends State<CartScreen> {
           _bairroCtrl.text = dados['bairro'] as String? ?? '';
           _cidadeCtrl.text = dados['localidade'] as String? ?? '';
           _ufCtrl.text = dados['uf'] as String? ?? '';
+          _latitudeEntrega = null;
+          _longitudeEntrega = null;
+          _freteResultados = {};
+          _freteErro = null;
         });
       }
+      await _geocodificarEAvaliar(mostrarErro: false);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível buscar o CEP. Verifique sua conexão.'), backgroundColor: AppColors.error),
+          const SnackBar(
+            content: Text(
+              'Não foi possível buscar o CEP. Verifique sua conexão.',
+            ),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -130,21 +177,22 @@ class _CartScreenState extends State<CartScreen> {
     if (unidadeIds.isEmpty) return;
     _carregandoTaxas = true;
     try {
-      final res = await Supabase.instance.client
-          .from('unidades')
-          .select('id, taxa_entrega, frete_gratis_acima')
-          .inFilter('id', unidadeIds.toList());
+      final lista = await _freteService.buscarConfiguracoes(unidadeIds);
       final taxas = <int, double>{};
       final acima = <int, double?>{};
-      for (final row in (res as List).cast<Map<String, dynamic>>()) {
-        final id = row['id'] as int;
-        taxas[id] = (row['taxa_entrega'] as num?)?.toDouble() ?? 0;
-        acima[id] = (row['frete_gratis_acima'] as num?)?.toDouble();
+      final configs = <int, UnidadeFreteConfig>{};
+      for (final config in lista) {
+        // Lojas por distância/faixas só mostram frete depois da cotação real.
+        // Evita exibir uma taxa fixa antiga (ex.: R$ 8,99) antes de calcular.
+        taxas[config.id] = config.freteModo == 'fixo' ? config.taxaEntrega : 0;
+        acima[config.id] = config.freteGratisAcima;
+        configs[config.id] = config;
       }
       if (mounted) {
         setState(() {
           _taxaUnidades = taxas;
           _freteGratisAcima = acima;
+          _unidadesFrete = configs;
           _taxasCarregadas.addAll(unidadeIds);
         });
       }
@@ -154,8 +202,8 @@ class _CartScreenState extends State<CartScreen> {
     _carregandoTaxas = false;
   }
 
-  /// Taxa de entrega estimada do carrinho (por unidade, considerando
-  /// frete grátis do produto e a regra de valor mínimo da loja).
+  /// Taxa de entrega do carrinho. Usa a cotação por distância quando ela já
+  /// foi calculada; senão mantém a taxa fixa como fallback.
   double _calcularTaxa(CartProvider cart) {
     if (_tipoEntrega != 'entrega') return 0;
     final porUnidade = <int, List<CartItem>>{};
@@ -164,6 +212,11 @@ class _CartScreenState extends State<CartScreen> {
     }
     var taxa = 0.0;
     porUnidade.forEach((unidadeId, itens) {
+      final cotado = _freteResultados[unidadeId];
+      if (cotado != null) {
+        if (!cotado.foraArea) taxa += cotado.valor;
+        return;
+      }
       if (itens.every((i) => i.produtoFreteGratis)) return;
       final subtotalUnidade = itens.fold<double>(0, (s, i) => s + i.total);
       final acima = _freteGratisAcima[unidadeId];
@@ -173,11 +226,228 @@ class _CartScreenState extends State<CartScreen> {
     return taxa;
   }
 
+  void _selecionarOpcaoFrete(int unidadeId, String? cotacaoId) {
+    final atual = _freteResultados[unidadeId];
+    if (atual == null || cotacaoId == null) return;
+    OpcaoFrete? escolhida;
+    for (final opcao in atual.opcoes) {
+      if (opcao.cotacaoId == cotacaoId) {
+        escolhida = opcao;
+        break;
+      }
+    }
+    if (escolhida == null) return;
+    setState(() {
+      _freteResultados[unidadeId] = atual.copyWithOpcao(escolhida!);
+    });
+  }
+
   void _garantirTaxas(CartProvider cart) {
     if (_tipoEntrega != 'entrega' || cart.items.isEmpty) return;
     final ids = cart.items.map((i) => i.produtoUnidadeId ?? 1).toSet();
     if (_carregandoTaxas || _taxasCarregadas.containsAll(ids)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) => _carregarTaxas(ids));
+  }
+
+  void _invalidarFrete() {
+    _latitudeEntrega = null;
+    _longitudeEntrega = null;
+    _coordenadasFonte = null;
+    _enderecoSelecionadoId = null;
+    _freteResultados = {};
+    _freteErro = null;
+  }
+
+  bool get _precisaDistancia => _unidadesFrete.values.any(
+    (u) => u.freteModo == 'distancia' || u.freteModo == 'faixas',
+  );
+
+  bool get _precisaCotacaoExterna => _unidadesFrete.values.any(
+    (u) => u.freteModo == 'correios' || u.freteModo == 'melhor_envio',
+  );
+
+  Future<bool> _geocodificarEAvaliar({bool mostrarErro = true}) async {
+    if (_tipoEntrega != 'entrega') return true;
+
+    final cart = context.read<CartProvider>();
+    final ids = cart.items.map((i) => i.produtoUnidadeId ?? 1).toSet();
+    if (!_taxasCarregadas.containsAll(ids)) {
+      await _carregarTaxas(ids);
+    }
+    // Lojas com taxa fixa continuam funcionando mesmo se o geocoding falhar.
+    if (!_precisaDistancia && !_precisaCotacaoExterna) return true;
+
+    final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (_precisaCotacaoExterna && cep.length != 8) {
+      if (mostrarErro && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Informe o CEP para cotar a entrega.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return false;
+    }
+    if (_precisaDistancia &&
+        cep.length != 8 &&
+        (_ruaCtrl.text.trim().isEmpty || _cidadeCtrl.text.trim().isEmpty)) {
+      if (mostrarErro && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Informe o CEP ou o endereço para calcular a entrega.',
+            ),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return false;
+    }
+
+    if (_precisaDistancia &&
+        (_latitudeEntrega == null || _longitudeEntrega == null)) {
+      setState(() => _buscandoCoordenadas = true);
+      final coordenadas = await _freteService.geocodificar(
+        cep: cep,
+        rua: _ruaCtrl.text.trim(),
+        numero: _numeroCtrl.text.trim(),
+        bairro: _bairroCtrl.text.trim(),
+        cidade: _cidadeCtrl.text.trim(),
+        uf: _ufCtrl.text.trim(),
+      );
+      if (mounted) setState(() => _buscandoCoordenadas = false);
+      if (coordenadas == null) {
+        if (mounted) {
+          setState(
+            () => _freteErro =
+                'Não foi possível localizar o endereço. Confira o CEP, rua, número e cidade.',
+          );
+          if (mostrarErro) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Não foi possível localizar o endereço para calcular a entrega.',
+                ),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+        }
+        return false;
+      }
+      _latitudeEntrega = coordenadas.latitude;
+      _longitudeEntrega = coordenadas.longitude;
+      _coordenadasFonte = coordenadas.fonte;
+    }
+
+    return _calcularFreteAtual(mostrarErro: mostrarErro);
+  }
+
+  Future<bool> _calcularFreteAtual({bool mostrarErro = true}) async {
+    if (!mounted) return false;
+    final cart = context.read<CartProvider>();
+    if (cart.items.isEmpty) return false;
+
+    final ids = cart.items.map((i) => i.produtoUnidadeId ?? 1).toSet();
+    if (!_taxasCarregadas.containsAll(ids)) {
+      await _carregarTaxas(ids);
+    }
+
+    setState(() {
+      _calculandoFrete = true;
+      _freteErro = null;
+    });
+
+    final porUnidade = <int, List<CartItem>>{};
+    for (final i in cart.items) {
+      porUnidade.putIfAbsent(i.produtoUnidadeId ?? 1, () => []).add(i);
+    }
+
+    final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final resultados = <int, FreteResultado>{};
+    String? erro;
+    for (final entry in porUnidade.entries) {
+      final unidadeId = entry.key;
+      final itens = entry.value;
+      final subtotal = itens.fold<double>(0, (s, i) => s + i.total);
+      final peso = itens.fold<double>(
+        0,
+        (s, i) => s + (i.produtoPesoKg ?? 0) * i.quantidade,
+      );
+      final todosGratis = itens.every((i) => i.produtoFreteGratis);
+      final config = _unidadesFrete[unidadeId];
+      final externo =
+          config?.freteModo == 'correios' ||
+          config?.freteModo == 'melhor_envio';
+
+      FreteResultado? resultado;
+      try {
+        if (externo) {
+          resultado = await _freteService.cotarTransportadora(
+            unidadeId: unidadeId,
+            cepDestino: cep,
+          );
+        } else if (_latitudeEntrega != null && _longitudeEntrega != null) {
+          resultado = await _freteService.calcularNoServidor(
+            unidadeId: unidadeId,
+            latitude: _latitudeEntrega!,
+            longitude: _longitudeEntrega!,
+            subtotal: subtotal,
+            todosFreteGratis: todosGratis,
+            pesoKg: peso,
+          );
+        }
+      } catch (e) {
+        debugPrint('Erro cotação frete: $e');
+        erro = e is StateError
+            ? e.message
+            : 'Não foi possível cotar o frete. Tente novamente.';
+      }
+
+      if (resultado == null && !externo) {
+        resultado =
+            config == null ||
+                _latitudeEntrega == null ||
+                _longitudeEntrega == null
+            ? FreteResultado(
+                unidadeId: unidadeId,
+                valor: _taxaUnidades[unidadeId] ?? 0,
+                mensagem: null,
+              )
+            : _freteService.calcularLocal(
+                unidade: config,
+                latitude: _latitudeEntrega!,
+                longitude: _longitudeEntrega!,
+                subtotal: subtotal,
+                todosFreteGratis: todosGratis,
+                pesoKg: peso,
+              );
+      }
+
+      if (resultado == null) continue;
+
+      resultados[unidadeId] = resultado;
+      if (resultado.foraArea) {
+        erro =
+            resultado.mensagem ?? 'Uma das lojas não entrega neste endereço.';
+      }
+    }
+
+    if (!mounted) return false;
+    setState(() {
+      _freteResultados = resultados;
+      _calculandoFrete = false;
+      _freteErro = erro;
+    });
+
+    if (erro != null && mostrarErro) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(erro), backgroundColor: AppColors.error),
+      );
+      return false;
+    }
+    return erro == null;
   }
 
   Future<void> _abrirEnderecos() async {
@@ -186,7 +456,9 @@ class _CartScreenState extends State<CartScreen> {
     if (_enderecos.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nenhum endereço salvo ainda. Preencha abaixo e toque em "Salvar endereço".'),
+          content: Text(
+            'Nenhum endereço salvo ainda. Preencha abaixo e toque em "Salvar endereço".',
+          ),
         ),
       );
       return;
@@ -201,22 +473,34 @@ class _CartScreenState extends State<CartScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
-              child: Text('Endereços salvos',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              child: Text(
+                'Endereços salvos',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
             ),
             Flexible(
               child: ListView(
                 shrinkWrap: true,
                 children: _enderecos
-                    .map((e) => ListTile(
-                          leading: Icon(
-                            e.principal ? Icons.star_rounded : Icons.location_on_outlined,
-                            color: e.principal ? AppColors.primary : null,
-                          ),
-                          title: Text(e.apelido.isNotEmpty ? e.apelido : 'Endereço'),
-                          subtitle: Text(e.resumo, maxLines: 2, overflow: TextOverflow.ellipsis),
-                          onTap: () => Navigator.pop(ctx, e),
-                        ))
+                    .map(
+                      (e) => ListTile(
+                        leading: Icon(
+                          e.principal
+                              ? Icons.star_rounded
+                              : Icons.location_on_outlined,
+                          color: e.principal ? AppColors.primary : null,
+                        ),
+                        title: Text(
+                          e.apelido.isNotEmpty ? e.apelido : 'Endereço',
+                        ),
+                        subtitle: Text(
+                          e.resumo,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onTap: () => Navigator.pop(ctx, e),
+                      ),
+                    )
                     .toList(),
               ),
             ),
@@ -242,10 +526,30 @@ class _CartScreenState extends State<CartScreen> {
       _bairroCtrl.text = escolhido.bairro;
       _cidadeCtrl.text = escolhido.cidade;
       _ufCtrl.text = escolhido.uf;
+      _freteResultados = {};
+      _freteErro = null;
+      _enderecoSelecionadoId = escolhido.id;
+      if (escolhido.temCoordenadas) {
+        _latitudeEntrega = escolhido.latitude;
+        _longitudeEntrega = escolhido.longitude;
+        _coordenadasFonte = escolhido.geocodeFonte ?? 'endereco_salvo';
+      } else {
+        _latitudeEntrega = null;
+        _longitudeEntrega = null;
+        _coordenadasFonte = null;
+      }
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Endereço aplicado ao pedido!'), backgroundColor: AppColors.success),
+      const SnackBar(
+        content: Text('Endereço aplicado ao pedido!'),
+        backgroundColor: AppColors.success,
+      ),
     );
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _geocodificarEAvaliar(mostrarErro: false),
+      );
+    }
   }
 
   Future<void> _salvarEnderecoAtual() async {
@@ -260,7 +564,9 @@ class _CartScreenState extends State<CartScreen> {
         _ufCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Preencha o endereço completo (com CEP) antes de salvar.'),
+          content: Text(
+            'Preencha o endereço completo (com CEP) antes de salvar.',
+          ),
           backgroundColor: AppColors.error,
         ),
       );
@@ -275,10 +581,15 @@ class _CartScreenState extends State<CartScreen> {
         content: TextField(
           controller: apelidoCtrl,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Apelido (ex: Casa, Trabalho)'),
+          decoration: const InputDecoration(
+            labelText: 'Apelido (ex: Casa, Trabalho)',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, apelidoCtrl.text.trim()),
             child: const Text('Salvar'),
@@ -294,8 +605,12 @@ class _CartScreenState extends State<CartScreen> {
     apelidoCtrl.dispose();
     if (!mounted) return;
 
+    if (_latitudeEntrega == null || _longitudeEntrega == null) {
+      await _geocodificarEAvaliar(mostrarErro: false);
+    }
+
     try {
-      await _enderecoService.adicionar(
+      final novoId = await _enderecoService.adicionar(
         userId,
         apelido: nome,
         cep: cep,
@@ -306,17 +621,27 @@ class _CartScreenState extends State<CartScreen> {
         cidade: _cidadeCtrl.text.trim(),
         uf: _ufCtrl.text.trim().toUpperCase(),
         principal: _enderecos.isEmpty,
+        latitude: _latitudeEntrega,
+        longitude: _longitudeEntrega,
+        geocodeFonte: _coordenadasFonte,
       );
+      _enderecoSelecionadoId = novoId;
       await _carregarEnderecos();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Endereço salvo!'), backgroundColor: AppColors.success),
+          const SnackBar(
+            content: Text('Endereço salvo!'),
+            backgroundColor: AppColors.success,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar endereço: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text('Erro ao salvar endereço: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -361,7 +686,9 @@ class _CartScreenState extends State<CartScreen> {
     if (aplicado != null && subtotal < aplicado.valorMinimo) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Este cupom exige um valor mínimo de R\$ ${aplicado.valorMinimo.toStringAsFixed(2)}.'),
+          content: Text(
+            'Este cupom exige um valor mínimo de R\$ ${aplicado.valorMinimo.toStringAsFixed(2)}.',
+          ),
           backgroundColor: AppColors.error,
         ),
       );
@@ -371,7 +698,10 @@ class _CartScreenState extends State<CartScreen> {
     _cupomCtrl.clear();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cupom ${aplicado?.codigo} aplicado!'), backgroundColor: AppColors.success),
+        SnackBar(
+          content: Text('Cupom ${aplicado?.codigo} aplicado!'),
+          backgroundColor: AppColors.success,
+        ),
       );
     }
   }
@@ -387,36 +717,58 @@ class _CartScreenState extends State<CartScreen> {
 
     final nomes = <String>[
       ...esgotados.map((i) => '${i.produtoNome ?? 'Produto'} (esgotado)'),
-      ...acimaEstoque.map((i) => '${i.produtoNome ?? 'Produto'} (restam apenas ${i.produtoEstoque})'),
+      ...acimaEstoque.map(
+        (i) =>
+            '${i.produtoNome ?? 'Produto'} (restam apenas ${i.produtoEstoque})',
+      ),
     ];
 
     final remover = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Itens indisponíveis', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Itens indisponíveis',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Alguns itens do seu carrinho não estão disponíveis na quantidade desejada:'),
+            const Text(
+              'Alguns itens do seu carrinho não estão disponíveis na quantidade desejada:',
+            ),
             const SizedBox(height: 12),
-            ...nomes.map((n) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline_rounded, size: 16, color: AppColors.error),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(n, style: const TextStyle(fontSize: 13))),
-                    ],
-                  ),
-                )),
+            ...nomes.map(
+              (n) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.error_outline_rounded,
+                      size: 16,
+                      color: AppColors.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(n, style: const TextStyle(fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Remover itens indisponíveis'),
           ),
         ],
@@ -433,13 +785,75 @@ class _CartScreenState extends State<CartScreen> {
     return false;
   }
 
+  /// Garante que o endereço usado no checkout exista no servidor. O v6 só
+  /// aceita coordenadas vindas de `enderecos_usuario` para frete por distância.
+  Future<int?> _garantirEnderecoUsuario(String userId, String cep) async {
+    final rua = _ruaCtrl.text.trim();
+    final numero = _numeroCtrl.text.trim();
+
+    if (_enderecoSelecionadoId != null) {
+      for (final e in _enderecos) {
+        if (e.id == _enderecoSelecionadoId && e.cep == cep) {
+          return e.id;
+        }
+      }
+      _enderecoSelecionadoId = null;
+    }
+
+    for (final e in _enderecos) {
+      if (e.cep == cep && e.rua == rua && e.numero == numero) {
+        _enderecoSelecionadoId = e.id;
+        if (_latitudeEntrega == null && e.temCoordenadas) {
+          _latitudeEntrega = e.latitude;
+          _longitudeEntrega = e.longitude;
+          _coordenadasFonte = e.geocodeFonte ?? 'endereco_salvo';
+        }
+        return e.id;
+      }
+    }
+
+    if (_latitudeEntrega == null || _longitudeEntrega == null) {
+      await _geocodificarEAvaliar(mostrarErro: false);
+    }
+
+    final id = await _enderecoService.adicionar(
+      userId,
+      apelido: 'Entrega',
+      cep: cep,
+      rua: rua,
+      numero: numero,
+      complemento: _complementoCtrl.text.trim(),
+      bairro: _bairroCtrl.text.trim(),
+      cidade: _cidadeCtrl.text.trim(),
+      uf: _ufCtrl.text.trim().toUpperCase(),
+      principal: _enderecos.isEmpty,
+      latitude: _latitudeEntrega,
+      longitude: _longitudeEntrega,
+      geocodeFonte: _coordenadasFonte,
+    );
+    _enderecoSelecionadoId = id;
+    return id;
+  }
+
   Future<void> _finalizarCompra(CartProvider cart, CupomProvider cupom) async {
     if (cart.items.isEmpty || _finalizando) return;
 
+    final config = context.read<AppConfigProvider>();
+    if (!config.checkoutAtivo || !config.pagamentosAtivo) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            config.mensagemManutencao ??
+                'O checkout está temporariamente indisponível. Tente novamente em instantes.',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
     if (!await _validarEstoque(cart)) return;
     if (!mounted) return;
-
-    final taxaEntrega = _calcularTaxa(cart);
 
     final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (_tipoEntrega == 'entrega') {
@@ -460,31 +874,84 @@ class _CartScreenState extends State<CartScreen> {
         );
         return;
       }
+
+      final cartIds = cart.items.map((i) => i.produtoUnidadeId ?? 1).toSet();
+      if (!_taxasCarregadas.containsAll(cartIds)) {
+        await _carregarTaxas(cartIds);
+      }
+      final precisaCalcularFrete =
+          (_precisaDistancia &&
+              (_latitudeEntrega == null || _longitudeEntrega == null)) ||
+          ((_precisaDistancia || _precisaCotacaoExterna) &&
+              _freteResultados.isEmpty);
+      if (precisaCalcularFrete) {
+        final ok = await _geocodificarEAvaliar();
+        if (!ok || !mounted) return;
+      }
+      if (_freteResultados.values.any((f) => f.foraArea)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'O endereço está fora da área de entrega de uma das lojas.',
+            ),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
     }
 
-    final subtotal = cart.total;
+    final taxaEntrega = _calcularTaxa(cart);
+
+    final subtotalCheio = cart.subtotal;
+    final subtotalComDesconto = cart.total;
+    final descontoItens = cart.economia;
     final descontoCupom = cupom.cupomAplicado != null
-        ? subtotal - cupom.calcularDesconto(subtotal)
+        ? subtotalComDesconto - cupom.calcularDesconto(subtotalComDesconto)
         : 0.0;
-    final total = subtotal - descontoCupom + taxaEntrega;
+    final total = subtotalComDesconto - descontoCupom + taxaEntrega;
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar pedido', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Confirmar pedido',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _linhaConfirm('Itens', '${cart.items.length} ${cart.items.length == 1 ? 'produto' : 'produtos'}'),
-            _linhaConfirm('Subtotal', 'R\$ ${subtotal.toStringAsFixed(2)}'),
-            if (cart.economia > 0)
-              _linhaConfirm('Desconto nos itens', '-R\$ ${cart.economia.toStringAsFixed(2)}', cor: AppColors.success),
+            _linhaConfirm(
+              'Itens',
+              '${cart.items.length} ${cart.items.length == 1 ? 'produto' : 'produtos'}',
+            ),
+            _linhaConfirm(
+              'Subtotal',
+              'R\$ ${subtotalCheio.toStringAsFixed(2)}',
+            ),
+            if (descontoItens > 0)
+              _linhaConfirm(
+                'Desconto nos itens',
+                '-R\$ ${descontoItens.toStringAsFixed(2)}',
+                cor: AppColors.success,
+              ),
             if (descontoCupom > 0)
-              _linhaConfirm('Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: AppColors.success),
+              _linhaConfirm(
+                'Cupom ${cupom.cupomAplicado?.codigo}',
+                '-R\$ ${descontoCupom.toStringAsFixed(2)}',
+                cor: AppColors.success,
+              ),
             if (taxaEntrega > 0)
-              _linhaConfirm('Taxa de entrega', 'R\$ ${taxaEntrega.toStringAsFixed(2)}'),
+              _linhaConfirm(
+                'Taxa de entrega',
+                'R\$ ${taxaEntrega.toStringAsFixed(2)}',
+              ),
             const Divider(height: 24),
-            _linhaConfirm('Total', 'R\$ ${total.toStringAsFixed(2)}', bold: true),
+            _linhaConfirm(
+              'Total',
+              'R\$ ${total.toStringAsFixed(2)}',
+              bold: true,
+            ),
             const SizedBox(height: 8),
             const Text(
               'Você será direcionado para o pagamento: PIX, cartão de crédito, débito ou boleto.',
@@ -493,10 +960,16 @@ class _CartScreenState extends State<CartScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Confirmar pedido'),
           ),
         ],
@@ -506,32 +979,110 @@ class _CartScreenState extends State<CartScreen> {
 
     setState(() => _finalizando = true);
     try {
-      final userId = context.read<AuthProvider>().user?.id;
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user?.id;
       if (userId == null) return;
 
+      final entrega = _tipoEntrega == 'entrega';
+      final cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+      int? enderecoUsuarioId;
+      if (entrega) {
+        enderecoUsuarioId = await _garantirEnderecoUsuario(userId, cep);
+        if (enderecoUsuarioId == null && _precisaDistancia) {
+          throw StateError(
+            'Não foi possível salvar/localizar o endereço com localização. '
+            'Informe o endereço novamente.',
+          );
+        }
+      }
+      final cotacoesExternas = entrega
+          ? _freteResultados.entries
+                .where((e) => e.value.cotacaoId != null)
+                .map(
+                  (e) => {'unidade_id': e.key, 'cotacao_id': e.value.cotacaoId},
+                )
+                .toList()
+          : <Map<String, dynamic>>[];
+      final fretesPorUnidade = entrega
+          ? _freteResultados.entries
+                .where((e) => e.value.cotacaoId != null)
+                .map(
+                  (e) => {
+                    'unidade_id': e.key,
+                    'cotacao_id': e.value.cotacaoId,
+                    'provider': e.value.provider,
+                    'servico': e.value.servico,
+                    'servico_codigo': e.value.servicoCodigo,
+                    'transportadora': e.value.transportadora,
+                  },
+                )
+                .toList()
+          : <Map<String, dynamic>>[];
+      final endereco = entrega
+          ? <String, dynamic>{
+              'rua': _ruaCtrl.text.trim(),
+              'numero': _numeroCtrl.text.trim(),
+              'complemento': _complementoCtrl.text.trim(),
+              'bairro': _bairroCtrl.text.trim(),
+              'cidade': _cidadeCtrl.text.trim(),
+              'uf': _ufCtrl.text.trim().toUpperCase(),
+              'cep': cep,
+            }
+          : null;
       final service = CheckoutService();
+
+      // Se o cliente mudou itens/endereço/cupom após uma falha, a chave antiga
+      // não pode ser reutilizada (o servidor recusa payload diferente).
+      final assinatura = [
+        ...cart.items.map((i) => '${i.produtoId}:${i.quantidade}:${i.cor ?? ''}'),
+        cupom.cupomAplicado?.id?.toString() ?? '',
+        _tipoEntrega,
+        cep,
+        _enderecoSelecionadoId?.toString() ?? '',
+      ].join('|');
+      if (_checkoutKeyAssinatura != assinatura) {
+        _checkoutKey = null;
+        _checkoutKeyAssinatura = assinatura;
+      }
+      _checkoutKey ??= CheckoutService.novoIdempotencyKey();
       final pedidos = await service.finalizar(
         userId: userId,
         itens: cart.items,
         cupomDescontoTotal: descontoCupom,
         cupomId: cupom.cupomAplicado?.id,
         tipoEntrega: _tipoEntrega,
-        enderecoEntrega: _tipoEntrega == 'entrega' ? _enderecoFormatado : null,
-        cepEntrega: _tipoEntrega == 'entrega' && cep.length == 8 ? cep : null,
+        enderecoEntrega: entrega ? _enderecoFormatado : null,
+        cepEntrega: entrega && cep.length == 8 ? cep : null,
+        enderecoLat: entrega ? _latitudeEntrega : null,
+        enderecoLng: entrega ? _longitudeEntrega : null,
+        cotacoesExternas: cotacoesExternas,
+        endereco: endereco,
+        destinatarioCpf: auth.user?.cpf,
+        destinatarioTelefone: auth.user?.telefone,
+        fretePorUnidade: fretesPorUnidade,
+        enderecoUsuarioId: enderecoUsuarioId,
+        idempotencyKey: _checkoutKey,
       );
 
       // Limpa a UI (carrinho + cupom) sem nunca falhar o fluxo: os pedidos já
       // foram criados de forma atômica no banco. Se a limpeza falhar aqui
-      // (rede), não pode virar "erro ao finalizar" nem permitir pedido duplicado.
+      // (rede), mantém a chave de idempotência para o retry não duplicar.
       try {
         await cart.limpar();
+        _checkoutKey = null;
+        _checkoutKeyAssinatura = null;
       } catch (_) {}
       cupom.removerCupom();
       if (!mounted) return;
 
+      // O servidor é a fonte da verdade do total (cupom/taxa recalculados).
+      final totalServidor = pedidos.fold<double>(0, (s, p) => s + p.total);
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => PagamentoScreen(pedidos: pedidos, total: total),
+          builder: (_) => PagamentoScreen(
+            pedidos: pedidos,
+            total: totalServidor > 0 ? totalServidor : total,
+          ),
         ),
       );
     } catch (e) {
@@ -548,16 +1099,33 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  Widget _linhaConfirm(String label, String valor, {Color? cor, bool bold = false}) {
+  Widget _linhaConfirm(
+    String label,
+    String valor, {
+    Color? cor,
+    bool bold = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(fontSize: 13, color: cor ?? const Color(0xFFEDEDED), fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
-          Text(valor,
-              style: TextStyle(fontSize: 13, color: cor ?? const Color(0xFFEDEDED), fontWeight: bold ? FontWeight.w700 : FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: cor ?? const Color(0xFFEDEDED),
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 13,
+              color: cor ?? const Color(0xFFEDEDED),
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -575,8 +1143,12 @@ class _CartScreenState extends State<CartScreen> {
                 onPressed: () => context.pop(),
               )
             : null,
-        title: Text('Carrinho',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        title: Text(
+          'Carrinho',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
         elevation: 0,
       ),
       body: Consumer<CartProvider>(
@@ -609,20 +1181,32 @@ class _CartScreenState extends State<CartScreen> {
           return Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  0,
+                ),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
                     onPressed: () => context.go('/'),
                     icon: const Icon(Icons.arrow_back_rounded, size: 18),
                     label: const Text('Continuar comprando'),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                    ),
                   ),
                 ),
               ),
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 0, AppSpacing.sm, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.sm,
+                    0,
+                    AppSpacing.sm,
+                    0,
+                  ),
                   itemCount: cart.items.length,
                   itemBuilder: (context, index) {
                     final item = cart.items[index];
@@ -648,14 +1232,19 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Widget _buildCartItem(BuildContext context, CartProvider cart, CartItem item,
-      CupomProvider cupom) {
+  Widget _buildCartItem(
+    BuildContext context,
+    CartProvider cart,
+    CartItem item,
+    CupomProvider cupom,
+  ) {
     final esgotado = item.esgotado;
     final emPromo = item.temPromocao;
     final estoqueBaixo = !esgotado && (item.produtoEstoque ?? 0) <= 5;
     final estoque = item.produtoEstoque ?? 0;
     final percentualOff = emPromo && (item.produtoPreco ?? 0) > 0
-        ? (((item.produtoPreco! - item.precoAtual) / item.produtoPreco!) * 100).round()
+        ? (((item.produtoPreco! - item.precoAtual) / item.produtoPreco!) * 100)
+              .round()
         : 0;
 
     return Container(
@@ -664,7 +1253,9 @@ class _CartScreenState extends State<CartScreen> {
       decoration: BoxDecoration(
         color: ThemeColors.surface(context),
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: esgotado ? Border.all(color: AppColors.error.withValues(alpha: 0.4)) : null,
+        border: esgotado
+            ? Border.all(color: AppColors.error.withValues(alpha: 0.4))
+            : null,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -683,29 +1274,47 @@ class _CartScreenState extends State<CartScreen> {
                           fit: BoxFit.contain,
                           placeholder: (_, __) => Container(
                             color: Colors.white,
-                            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
                           errorWidget: (_, __, ___) => Container(
                             color: Colors.white,
-                            child: Icon(Icons.image_outlined, color: ThemeColors.hint(context)),
+                            child: Icon(
+                              Icons.image_outlined,
+                              color: ThemeColors.hint(context),
+                            ),
                           ),
                         )
                       : Container(
                           color: Colors.white,
-                          child: Icon(Icons.image_outlined, color: ThemeColors.hint(context)),
+                          child: Icon(
+                            Icons.image_outlined,
+                            color: ThemeColors.hint(context),
+                          ),
                         ),
                   if (esgotado)
                     Container(
                       color: Colors.black.withValues(alpha: 0.45),
                       alignment: Alignment.center,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text('ESGOTADO',
-                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.error, letterSpacing: 0.5)),
+                        child: const Text(
+                          'ESGOTADO',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.error,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -719,7 +1328,9 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 Text(
                   item.produtoNome ?? 'Produto',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -733,12 +1344,20 @@ class _CartScreenState extends State<CartScreen> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _corDe(item.cor!),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.4),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
-                      Text('Cor: ${item.cor}',
-                          style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context), fontWeight: FontWeight.w600)),
+                      Text(
+                        'Cor: ${item.cor}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.secondaryText(context),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -748,17 +1367,30 @@ class _CartScreenState extends State<CartScreen> {
                     children: [
                       Text(
                         'R\$ ${(item.produtoPreco ?? 0).toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF9C9C9C), decoration: TextDecoration.lineThrough),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF9C9C9C),
+                          decoration: TextDecoration.lineThrough,
+                        ),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.success.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: Text('-$percentualOff%',
-                            style: const TextStyle(fontSize: 10, color: AppColors.success, fontWeight: FontWeight.w700)),
+                        child: Text(
+                          '-$percentualOff%',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -766,9 +1398,9 @@ class _CartScreenState extends State<CartScreen> {
                 Text(
                   'R\$ ${item.precoAtual.toStringAsFixed(2)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: emPromo ? AppColors.success : null,
-                      ),
+                    fontWeight: FontWeight.w700,
+                    color: emPromo ? AppColors.success : null,
+                  ),
                 ),
                 // Cupom percentual aplicado ao produto (evidência no item)
                 if (cupom.cupomAplicado != null &&
@@ -778,7 +1410,10 @@ class _CartScreenState extends State<CartScreen> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.success.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
@@ -786,7 +1421,10 @@ class _CartScreenState extends State<CartScreen> {
                         child: Text(
                           '-${cupom.cupomAplicado!.valor.toInt()}% cupom ${cupom.cupomAplicado!.codigo}',
                           style: const TextStyle(
-                              fontSize: 10, color: AppColors.success, fontWeight: FontWeight.w700),
+                            fontSize: 10,
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
@@ -794,24 +1432,51 @@ class _CartScreenState extends State<CartScreen> {
                 ],
                 const SizedBox(height: 2),
                 if (esgotado)
-                  const Text('Sem estoque no momento',
-                      style: TextStyle(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w600))
+                  const Text(
+                    'Sem estoque no momento',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  )
                 else if (estoqueBaixo)
-                  Text('Restam apenas $estoque ${estoque == 1 ? 'unidade' : 'unidades'}',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFFFFAD01), fontWeight: FontWeight.w600))
+                  Text(
+                    'Restam apenas $estoque ${estoque == 1 ? 'unidade' : 'unidades'}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFFFAD01),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  )
                 else
-                  Text('Em estoque',
-                      style: TextStyle(fontSize: 11, color: ThemeColors.success(context), fontWeight: FontWeight.w600)),
+                  Text(
+                    'Em estoque',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: ThemeColors.success(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 const SizedBox(height: AppSpacing.sm),
                 Row(
                   children: [
                     _buildQuantityButton(
                       icon: Icons.remove_rounded,
-                      onTap: esgotado ? null : () => cart.atualizarQuantidade(item.id, item.quantidade - 1),
+                      onTap: esgotado
+                          ? null
+                          : () => cart.atualizarQuantidade(
+                              item.id,
+                              item.quantidade - 1,
+                            ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
-                    Text('${item.quantidade}',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(
+                      '${item.quantidade}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(width: AppSpacing.sm),
                     _buildQuantityButton(
                       icon: Icons.add_rounded,
@@ -821,13 +1486,18 @@ class _CartScreenState extends State<CartScreen> {
                               if (item.quantidade >= estoque) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('Estoque máximo disponível: $estoque'),
+                                    content: Text(
+                                      'Estoque máximo disponível: $estoque',
+                                    ),
                                     duration: const Duration(seconds: 2),
                                   ),
                                 );
                                 return;
                               }
-                              cart.atualizarQuantidade(item.id, item.quantidade + 1);
+                              cart.atualizarQuantidade(
+                                item.id,
+                                item.quantidade + 1,
+                              );
                             },
                     ),
                   ],
@@ -837,11 +1507,19 @@ class _CartScreenState extends State<CartScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Subtotal',
-                        style: TextStyle(fontSize: 11, color: ThemeColors.secondaryText(context))),
+                    Text(
+                      'Subtotal',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: ThemeColors.secondaryText(context),
+                      ),
+                    ),
                     Text(
                       'R\$ ${item.total.toStringAsFixed(2)}',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
@@ -849,7 +1527,11 @@ class _CartScreenState extends State<CartScreen> {
             ),
           ),
           IconButton(
-            icon: Icon(Icons.delete_outline_rounded, color: ThemeColors.error(context), size: 20),
+            icon: Icon(
+              Icons.delete_outline_rounded,
+              color: ThemeColors.error(context),
+              size: 20,
+            ),
             onPressed: () => cart.remover(item.id),
           ),
         ],
@@ -862,14 +1544,17 @@ class _CartScreenState extends State<CartScreen> {
     if (n.contains('preto')) return const Color(0xFF111111);
     if (n.contains('branco')) return const Color(0xFFF5F5F5);
     if (n.contains('vermelho') || n.contains('vinho')) return AppColors.primary;
-    if (n.contains('dourado') || n.contains('gold')) return const Color(0xFFD4AF37);
+    if (n.contains('dourado') || n.contains('gold'))
+      return const Color(0xFFD4AF37);
     if (n.contains('azul')) return const Color(0xFF2D65F6);
     if (n.contains('verde')) return AppColors.success;
     if (n.contains('amarelo')) return const Color(0xFFFFC400);
     if (n.contains('rosa')) return const Color(0xFFFF80AB);
     if (n.contains('laranja')) return const Color(0xFFFF7A00);
-    if (n.contains('roxo') || n.contains('violeta')) return const Color(0xFF9C27B0);
-    if (n.contains('cinza') || n.contains('prata')) return const Color(0xFF9E9E9E);
+    if (n.contains('roxo') || n.contains('violeta'))
+      return const Color(0xFF9C27B0);
+    if (n.contains('cinza') || n.contains('prata'))
+      return const Color(0xFF9E9E9E);
     if (n.contains('marrom')) return const Color(0xFF795548);
     return AppColors.primary;
   }
@@ -884,24 +1569,37 @@ class _CartScreenState extends State<CartScreen> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: onTap == null ? ThemeColors.surfaceVariant(context).withValues(alpha: 0.5) : ThemeColors.surfaceVariant(context),
+          color: onTap == null
+              ? ThemeColors.surfaceVariant(context).withValues(alpha: 0.5)
+              : ThemeColors.surfaceVariant(context),
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        child: Icon(icon, size: 18, color: onTap == null ? ThemeColors.hint(context) : ThemeColors.primaryText(context)),
+        child: Icon(
+          icon,
+          size: 18,
+          color: onTap == null
+              ? ThemeColors.hint(context)
+              : ThemeColors.primaryText(context),
+        ),
       ),
     );
   }
 
   // ─── RESUMO (cupom + totais) ────────────────────────
 
-  Widget _buildResumo(BuildContext context, CartProvider cart, CupomProvider cupom) {
-    final subtotal = cart.total;
+  Widget _buildResumo(
+    BuildContext context,
+    CartProvider cart,
+    CupomProvider cupom,
+  ) {
+    final subtotalCheio = cart.subtotal;
+    final subtotalComDesconto = cart.total;
     final economiaItens = cart.economia;
     final descontoCupom = cupom.cupomAplicado != null
-        ? subtotal - cupom.calcularDesconto(subtotal)
+        ? subtotalComDesconto - cupom.calcularDesconto(subtotalComDesconto)
         : 0.0;
     final taxaEntrega = _calcularTaxa(cart);
-    final total = subtotal - descontoCupom + taxaEntrega;
+    final total = subtotalComDesconto - descontoCupom + taxaEntrega;
     _garantirTaxas(cart);
     final economiaTotal = economiaItens + descontoCupom;
     final temEsgotado = cart.itensEsgotados.isNotEmpty;
@@ -916,7 +1614,10 @@ class _CartScreenState extends State<CartScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Entrega / Retirada
-          const Text('Receber em', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          const Text(
+            'Receber em',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -934,7 +1635,11 @@ class _CartScreenState extends State<CartScreen> {
                   tipo: 'entrega',
                   icon: Icons.delivery_dining_rounded,
                   label: 'Entrega',
-                  subtitulo: 'Ver previsão',
+                  subtitulo: _freteResultados.isEmpty
+                      ? 'Calcular entrega'
+                      : _calcularTaxa(context.read<CartProvider>()) > 0
+                      ? 'R\$ ${_calcularTaxa(context.read<CartProvider>()).toStringAsFixed(2)}'
+                      : 'Grátis',
                 ),
               ),
             ],
@@ -947,10 +1652,15 @@ class _CartScreenState extends State<CartScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _abrirEnderecos,
                     icon: const Icon(Icons.bookmark_outline_rounded, size: 16),
-                    label: const Text('Endereço salvo', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Endereço salvo',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
@@ -959,10 +1669,15 @@ class _CartScreenState extends State<CartScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _salvarEnderecoAtual,
                     icon: const Icon(Icons.save_outlined, size: 16),
-                    label: const Text('Salvar endereço', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Salvar endereço',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
@@ -981,12 +1696,18 @@ class _CartScreenState extends State<CartScreen> {
                     decoration: InputDecoration(
                       labelText: 'CEP',
                       hintText: '00000-000',
-                      prefixIcon: const Icon(Icons.location_on_outlined, size: 18),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      prefixIcon: const Icon(
+                        Icons.location_on_outlined,
+                        size: 18,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       filled: true,
                       fillColor: ThemeColors.surfaceVariant(context),
                     ),
                     onSubmitted: (_) => _buscarCep(),
+                    onChanged: _onCepChanged,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -997,12 +1718,24 @@ class _CartScreenState extends State<CartScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                     ),
                     child: _buscandoCep
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Buscar', style: TextStyle(fontWeight: FontWeight.w600)),
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Buscar',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
                   ),
                 ),
               ],
@@ -1015,6 +1748,7 @@ class _CartScreenState extends State<CartScreen> {
                   child: TextField(
                     controller: _ruaCtrl,
                     decoration: _campoEndereco('Rua'),
+                    onChanged: (_) => setState(_invalidarFrete),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1023,6 +1757,7 @@ class _CartScreenState extends State<CartScreen> {
                     controller: _numeroCtrl,
                     decoration: _campoEndereco('Número'),
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(_invalidarFrete),
                   ),
                 ),
               ],
@@ -1036,6 +1771,7 @@ class _CartScreenState extends State<CartScreen> {
             TextField(
               controller: _bairroCtrl,
               decoration: _campoEndereco('Bairro'),
+              onChanged: (_) => setState(_invalidarFrete),
             ),
             const SizedBox(height: 8),
             Row(
@@ -1045,6 +1781,7 @@ class _CartScreenState extends State<CartScreen> {
                   child: TextField(
                     controller: _cidadeCtrl,
                     decoration: _campoEndereco('Cidade'),
+                    onChanged: (_) => setState(_invalidarFrete),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1053,6 +1790,7 @@ class _CartScreenState extends State<CartScreen> {
                     controller: _ufCtrl,
                     decoration: _campoEndereco('UF'),
                     maxLength: 2,
+                    onChanged: (_) => setState(_invalidarFrete),
                   ),
                 ),
               ],
@@ -1062,6 +1800,146 @@ class _CartScreenState extends State<CartScreen> {
               'Ao informar o CEP, os campos são preenchidos automaticamente (ViaCEP — gratuito).',
               style: TextStyle(fontSize: 10, color: ThemeColors.hint(context)),
             ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: (_calculandoFrete || _buscandoCoordenadas)
+                    ? null
+                    : () async {
+                        await _geocodificarEAvaliar();
+                      },
+                icon: (_calculandoFrete || _buscandoCoordenadas)
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.route_rounded, size: 18),
+                label: Text(
+                  _calculandoFrete
+                      ? 'Calculando entrega...'
+                      : _buscandoCoordenadas
+                      ? 'Localizando endereço...'
+                      : 'Calcular entrega',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.5),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+            if (_freteErro != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _freteErro!,
+                style: const TextStyle(fontSize: 11, color: AppColors.error),
+              ),
+            ],
+            if (_freteResultados.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ..._freteResultados.values.map(
+                (f) => Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: f.foraArea
+                        ? AppColors.error.withValues(alpha: 0.08)
+                        : AppColors.success.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            f.foraArea
+                                ? Icons.location_off_rounded
+                                : Icons.route_rounded,
+                            size: 16,
+                            color: f.foraArea
+                                ? AppColors.error
+                                : AppColors.success,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              f.foraArea
+                                  ? (f.mensagem ?? 'Fora da área de entrega')
+                                  : '${_unidadesFrete[f.unidadeId]?.nome ?? 'Loja'} • ${f.modalidadeTexto}'
+                                        '${f.previsaoTexto.isNotEmpty ? ' • ${f.previsaoTexto}' : ''}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: f.foraArea
+                                    ? AppColors.error
+                                    : AppColors.success,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            f.foraArea
+                                ? '—'
+                                : (f.valor > 0
+                                      ? 'R\$ ${f.valor.toStringAsFixed(2)}'
+                                      : 'Grátis'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: f.foraArea
+                                  ? AppColors.error
+                                  : AppColors.success,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (!f.foraArea && f.opcoes.length > 1) ...[
+                        const SizedBox(height: 4),
+                        DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            isExpanded: true,
+                            isDense: true,
+                            value: f.cotacaoId,
+                            hint: const Text(
+                              'Escolha o serviço de entrega',
+                              style: TextStyle(fontSize: 11),
+                            ),
+                            items: f.opcoes
+                                .where((o) => o.cotacaoId != null)
+                                .map(
+                                  (o) => DropdownMenuItem<String>(
+                                    value: o.cotacaoId,
+                                    child: Text(
+                                      o.rotulo,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (id) =>
+                                _selecionarOpcaoFrete(f.unidadeId, id),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: AppSpacing.md),
           // Cupom
@@ -1074,7 +1952,9 @@ class _CartScreenState extends State<CartScreen> {
                     decoration: InputDecoration(
                       hintText: 'Cupom de desconto',
                       prefixIcon: const Icon(Icons.discount_rounded, size: 18),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       filled: true,
                       fillColor: ThemeColors.surfaceVariant(context),
                       contentPadding: const EdgeInsets.symmetric(vertical: 0),
@@ -1088,16 +1968,30 @@ class _CartScreenState extends State<CartScreen> {
                 SizedBox(
                   height: 44,
                   child: ElevatedButton(
-                    onPressed: _aplicandoCupom ? null : () => _aplicarCupom(cupom),
+                    onPressed: _aplicandoCupom
+                        ? null
+                        : () => _aplicarCupom(cupom),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                     ),
                     child: _aplicandoCupom
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Aplicar', style: TextStyle(fontWeight: FontWeight.w600)),
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Aplicar',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
                   ),
                 ),
               ],
@@ -1112,17 +2006,29 @@ class _CartScreenState extends State<CartScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.discount_rounded, size: 18, color: AppColors.success),
+                  const Icon(
+                    Icons.discount_rounded,
+                    size: 18,
+                    color: AppColors.success,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       cupom.cupomAplicado!.descricao,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.success),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.success,
+                      ),
                     ),
                   ),
                   GestureDetector(
                     onTap: cupom.removerCupom,
-                    child: const Icon(Icons.close_rounded, size: 18, color: AppColors.success),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: AppColors.success,
+                    ),
                   ),
                 ],
               ),
@@ -1138,12 +2044,20 @@ class _CartScreenState extends State<CartScreen> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.error_outline_rounded, size: 18, color: AppColors.error),
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: 18,
+                    color: AppColors.error,
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Há itens esgotados no carrinho. Finalize a compra para revisá-los.',
-                      style: TextStyle(fontSize: 12, color: AppColors.error, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.error,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1151,20 +2065,61 @@ class _CartScreenState extends State<CartScreen> {
             ),
             const SizedBox(height: AppSpacing.md),
           ],
-          _linhaResumo(context, 'Subtotal', 'R\$ ${subtotal.toStringAsFixed(2)}'),
+          _linhaResumo(
+            context,
+            'Subtotal',
+            'R\$ ${subtotalCheio.toStringAsFixed(2)}',
+          ),
           if (economiaItens > 0)
-            _linhaResumo(context, 'Desconto nos itens', '-R\$ ${economiaItens.toStringAsFixed(2)}', cor: AppColors.success),
+            _linhaResumo(
+              context,
+              'Desconto nos itens',
+              '-R\$ ${economiaItens.toStringAsFixed(2)}',
+              cor: AppColors.success,
+            ),
           if (descontoCupom > 0)
-            _linhaResumo(context, 'Cupom ${cupom.cupomAplicado?.codigo}', '-R\$ ${descontoCupom.toStringAsFixed(2)}', cor: AppColors.success),
-          _linhaResumo(context, 'Entrega',
-              _tipoEntrega == 'retirada'
-                  ? 'Grátis (retirada na unidade)'
-                  : (taxaEntrega > 0 ? 'R\$ ${taxaEntrega.toStringAsFixed(2)}' : 'Grátis')),
+            _linhaResumo(
+              context,
+              'Cupom ${cupom.cupomAplicado?.codigo}',
+              '-R\$ ${descontoCupom.toStringAsFixed(2)}',
+              cor: AppColors.success,
+            ),
+          _linhaResumo(
+            context,
+            'Entrega',
+            _tipoEntrega == 'retirada'
+                ? 'Grátis (retirada na unidade)'
+                : (taxaEntrega > 0
+                      ? 'R\$ ${taxaEntrega.toStringAsFixed(2)}'
+                      : 'Grátis'),
+          ),
+          if (_tipoEntrega == 'entrega' && _freteResultados.isNotEmpty)
+            ..._freteResultados.values.map(
+              (f) => _linhaResumo(
+                context,
+                f.previsaoTexto.isEmpty
+                    ? 'Entrega'
+                    : 'Entrega • ${f.previsaoTexto}',
+                f.foraArea ? 'Fora da área' : f.modalidadeTexto,
+                cor: f.foraArea ? AppColors.error : null,
+              ),
+            ),
           if (economiaTotal > 0)
-            _linhaResumo(context, 'Você economizou', 'R\$ ${economiaTotal.toStringAsFixed(2)}',
-                cor: AppColors.success, bold: true),
+            _linhaResumo(
+              context,
+              'Você economizou',
+              'R\$ ${economiaTotal.toStringAsFixed(2)}',
+              cor: AppColors.success,
+              bold: true,
+            ),
           const Divider(height: 20),
-          _linhaResumo(context, 'Total', 'R\$ ${total.toStringAsFixed(2)}', bold: true, grande: true),
+          _linhaResumo(
+            context,
+            'Total',
+            'R\$ ${total.toStringAsFixed(2)}',
+            bold: true,
+            grande: true,
+          ),
         ],
       ),
     );
@@ -1188,7 +2143,10 @@ class _CartScreenState extends State<CartScreen> {
   }) {
     final sel = _tipoEntrega == tipo;
     return GestureDetector(
-      onTap: () => setState(() => _tipoEntrega = tipo),
+      onTap: () => setState(() {
+        _tipoEntrega = tipo;
+        _invalidarFrete();
+      }),
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
@@ -1201,27 +2159,49 @@ class _CartScreenState extends State<CartScreen> {
         ),
         child: Column(
           children: [
-            Icon(icon, size: 20, color: sel ? AppColors.primary : ThemeColors.hint(context)),
+            Icon(
+              icon,
+              size: 20,
+              color: sel ? AppColors.primary : ThemeColors.hint(context),
+            ),
             const SizedBox(height: 4),
-            Text(label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                  color: sel ? AppColors.primary : ThemeColors.primaryText(context),
-                )),
-            Text(subtitulo,
-                style: TextStyle(fontSize: 10, color: ThemeColors.secondaryText(context))),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                color: sel
+                    ? AppColors.primary
+                    : ThemeColors.primaryText(context),
+              ),
+            ),
+            Text(
+              subtitulo,
+              style: TextStyle(
+                fontSize: 10,
+                color: ThemeColors.secondaryText(context),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _linhaResumo(BuildContext context, String label, String valor,
-      {Color? cor, bool bold = false, bool grande = false}) {
+  Widget _linhaResumo(
+    BuildContext context,
+    String label,
+    String valor, {
+    Color? cor,
+    bool bold = false,
+    bool grande = false,
+  }) {
     final style = grande
-        ? Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: cor)
+        ? Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: cor,
+          )
         : TextStyle(
             fontSize: 13,
             color: cor ?? ThemeColors.primaryText(context),
@@ -1232,7 +2212,14 @@ class _CartScreenState extends State<CartScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: grande ? 15 : 13, color: cor ?? ThemeColors.secondaryText(context), fontWeight: bold ? FontWeight.w600 : FontWeight.w400)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: grande ? 15 : 13,
+              color: cor ?? ThemeColors.secondaryText(context),
+              fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
           Text(valor, style: style),
         ],
       ),
@@ -1241,7 +2228,11 @@ class _CartScreenState extends State<CartScreen> {
 
   // ─── BOTTOM BAR ─────────────────────────────────────
 
-  Widget _buildBottomBar(BuildContext context, CartProvider cart, CupomProvider cupom) {
+  Widget _buildBottomBar(
+    BuildContext context,
+    CartProvider cart,
+    CupomProvider cupom,
+  ) {
     final subtotal = cart.total;
     final descontoCupom = cupom.cupomAplicado != null
         ? subtotal - cupom.calcularDesconto(subtotal)
@@ -1263,11 +2254,17 @@ class _CartScreenState extends State<CartScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Total',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: ThemeColors.secondaryText(context))),
+                  Text(
+                    'Total',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ThemeColors.secondaryText(context),
+                    ),
+                  ),
                   Text(
                     'R\$ ${total.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
@@ -1275,16 +2272,30 @@ class _CartScreenState extends State<CartScreen> {
             SizedBox(
               height: 48,
               child: ElevatedButton(
-                onPressed: (_finalizando || cart.items.isEmpty) ? null : () => _finalizarCompra(cart, cupom),
+                onPressed: (_finalizando || cart.items.isEmpty)
+                    ? null
+                    : () => _finalizarCompra(cart, cupom),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                 ),
                 child: _finalizando
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Finalizar Compra', style: TextStyle(fontWeight: FontWeight.w700)),
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Finalizar Compra',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
               ),
             ),
           ],

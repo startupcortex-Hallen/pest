@@ -1,14 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <title>O Pest - Shop</title>
   <script>
     (function () {
-      var path = window.location.pathname;
-      var seg = path.split('/');
-      var base = seg.slice(0, seg.length - 1).join('/');
-      window.location.replace(base + '/'); 
+      var path = window.location.pathname || '/';
+      var base = path.indexOf('/pest/') === 0 ? '/pest/' : '/';
+      var route = path.indexOf(base) === 0 ? path.slice(base.length - 1) : path;
+      if (!route || route === '') route = '/';
+
+      // Evita redirecionar para fora do app.
+      var permitidos = [
+        '/produto/', '/categoria/', '/unidade/', '/post/',
+        '/aviso/', '/novidade/', '/evento/', '/busca'
+      ];
+      var ok = permitidos.some(function (p) { return route.indexOf(p) === 0; });
+      if (!ok) route = '/';
+
+      if (route === '/') {
+        window.location.replace(base);
+        return;
+      }
+      window.location.replace(base + '?redirect=' + encodeURIComponent(route));
     })();
   </script>
 </head>

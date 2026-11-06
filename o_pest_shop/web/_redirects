@@ -1,0 +1,3 @@
+# SPA fallback para Cloudflare Pages/Netlify.
+# No GitHub Pages o fallback é feito pelo 404.html.
+/* /index.html 200

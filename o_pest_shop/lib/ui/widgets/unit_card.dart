@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../../core/helpers/scale_helper.dart';
 import '../../core/helpers/theme_colors.dart';
@@ -78,8 +79,14 @@ class UnitCard extends StatelessWidget {
                   height: context.h(160).clamp(130.0, 200.0),
                   color: const Color(0xFF1A1A1A),
                   child: fotoUrl != null && fotoUrl!.isNotEmpty
-                      ? Image.network(fotoUrl!, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _buildImagePlaceholder())
+                      ? CachedNetworkImage(
+                          imageUrl: fotoUrl!,
+                          fit: BoxFit.cover,
+                          memCacheWidth: 800,
+                          maxWidthDiskCache: 1000,
+                          placeholder: (_, __) => _buildImagePlaceholder(),
+                          errorWidget: (_, __, ___) => _buildImagePlaceholder(),
+                        )
                       : _buildImagePlaceholder(),
                 ),
                 Positioned(

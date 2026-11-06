@@ -19,6 +19,21 @@ class Produto {
   final int parcelas;
   final double? precoPromocional;
   final List<String> cores;
+  final String? sku;
+  final String? gtin;
+  final double? pesoKg;
+  final double? comprimentoCm;
+  final double? larguraCm;
+  final double? alturaCm;
+  final String condicao;
+  final double? custo;
+  final String? mlCategoryId;
+  final String? mlDomainId;
+  final String? mlListingType;
+  final String? mlStatus;
+  final String? mlItemId;
+  final String? mlPermalink;
+  final bool mlSyncEnabled;
 
   Produto({
     required this.id,
@@ -41,6 +56,21 @@ class Produto {
     this.parcelas = 12,
     this.precoPromocional,
     this.cores = const [],
+    this.sku,
+    this.gtin,
+    this.pesoKg,
+    this.comprimentoCm,
+    this.larguraCm,
+    this.alturaCm,
+    this.condicao = 'new',
+    this.custo,
+    this.mlCategoryId,
+    this.mlDomainId,
+    this.mlListingType,
+    this.mlStatus,
+    this.mlItemId,
+    this.mlPermalink,
+    this.mlSyncEnabled = false,
   });
 
   factory Produto.fromJson(Map<String, dynamic> json) {
@@ -58,10 +88,10 @@ class Produto {
       imagens = [];
     }
 
-    String? marcaNome;
+    String? marcaNome = json['marca_nome'] as String?;
     final marcas = json['marcas'];
     if (marcas is Map) {
-      marcaNome = marcas['nome'] as String?;
+      marcaNome = marcas['nome'] as String? ?? marcaNome;
     }
 
     List<String> cores = [];
@@ -74,12 +104,12 @@ class Produto {
       cores = rawCores.replaceAll(RegExp(r'[{}]'), '').split(',');
     }
 
-    int? unidadeId;
-    String? unidadeNome;
+    int? unidadeId = json['unidade_id'] as int?;
+    String? unidadeNome = json['unidade_nome'] as String?;
     final unidades = json['unidades'];
     if (unidades is Map) {
-      unidadeId = unidades['id'] as int?;
-      unidadeNome = unidades['nome'] as String?;
+      unidadeId = unidades['id'] as int? ?? unidadeId;
+      unidadeNome = unidades['nome'] as String? ?? unidadeNome;
     }
 
     return Produto(
@@ -92,11 +122,11 @@ class Produto {
       categoriaId: json['categoria_id'] as int? ?? 0,
       categoriaNome: json['categorias'] is Map
           ? (json['categorias'] as Map)['nome'] as String?
-          : null,
+          : json['categoria_nome'] as String?,
       marcaId: json['marca_id'] as int?,
       marcaNome: marcaNome,
       estoque: json['estoque'] as int? ?? 0,
-      unidadeId: unidadeId ?? json['unidade_id'] as int?,
+      unidadeId: unidadeId,
       unidadeNome: unidadeNome,
       vendas: json['vendas'] as int? ?? 0,
       freteGratis: json['frete_gratis'] as bool? ?? false,
@@ -105,6 +135,21 @@ class Produto {
       parcelas: json['parcelas'] as int? ?? 12,
       precoPromocional: (json['preco_promocional'] as num?)?.toDouble(),
       cores: cores,
+      sku: json['sku'] as String?,
+      gtin: json['gtin'] as String?,
+      pesoKg: (json['peso_kg'] as num?)?.toDouble(),
+      comprimentoCm: (json['comprimento_cm'] as num?)?.toDouble(),
+      larguraCm: (json['largura_cm'] as num?)?.toDouble(),
+      alturaCm: (json['altura_cm'] as num?)?.toDouble(),
+      condicao: json['condicao'] as String? ?? 'new',
+      custo: (json['custo'] as num?)?.toDouble(),
+      mlCategoryId: json['ml_category_id'] as String?,
+      mlDomainId: json['ml_domain_id'] as String?,
+      mlListingType: json['ml_listing_type'] as String?,
+      mlStatus: json['ml_status'] as String?,
+      mlItemId: json['ml_item_id'] as String?,
+      mlPermalink: json['ml_permalink'] as String?,
+      mlSyncEnabled: json['ml_sync_enabled'] == true,
     );
   }
 
@@ -121,5 +166,17 @@ class Produto {
         'categoria_id': categoriaId,
         'estoque': estoque,
         'cores': cores,
+        if (sku != null) 'sku': sku,
+        if (gtin != null) 'gtin': gtin,
+        if (pesoKg != null) 'peso_kg': pesoKg,
+        if (comprimentoCm != null) 'comprimento_cm': comprimentoCm,
+        if (larguraCm != null) 'largura_cm': larguraCm,
+        if (alturaCm != null) 'altura_cm': alturaCm,
+        'condicao': condicao,
+        if (custo != null) 'custo': custo,
+        if (mlCategoryId != null) 'ml_category_id': mlCategoryId,
+        if (mlDomainId != null) 'ml_domain_id': mlDomainId,
+        if (mlListingType != null) 'ml_listing_type': mlListingType,
+        'ml_sync_enabled': mlSyncEnabled,
       };
 }

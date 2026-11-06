@@ -10,6 +10,9 @@ class Endereco {
   final String cidade;
   final String uf;
   final bool principal;
+  final double? latitude;
+  final double? longitude;
+  final String? geocodeFonte;
 
   Endereco({
     required this.id,
@@ -23,7 +26,12 @@ class Endereco {
     this.cidade = '',
     this.uf = '',
     this.principal = false,
+    this.latitude,
+    this.longitude,
+    this.geocodeFonte,
   });
+
+  bool get temCoordenadas => latitude != null && longitude != null;
 
   /// Endereço completo no mesmo padrão usado no carrinho/mapa das unidades.
   String get resumo {
@@ -51,6 +59,9 @@ class Endereco {
       cidade: json['cidade'] as String? ?? '',
       uf: json['uf'] as String? ?? '',
       principal: json['principal'] == true,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      geocodeFonte: json['geocode_fonte'] as String?,
     );
   }
 
@@ -64,5 +75,8 @@ class Endereco {
         'cidade': cidade,
         'uf': uf,
         'principal': principal,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        if (geocodeFonte != null) 'geocode_fonte': geocodeFonte,
       };
 }

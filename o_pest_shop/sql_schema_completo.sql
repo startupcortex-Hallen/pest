@@ -160,7 +160,7 @@ create table if not exists candidaturas (
 
 create table if not exists pedidos (
   id bigint generated always as identity primary key,
-  user_id uuid not null references perfis(id) on delete cascade,
+  user_id uuid not null references perfis(id) on delete restrict,
   unidade_id bigint references unidades(id),
   status text default 'pendente',
   total numeric,
@@ -469,7 +469,7 @@ begin
   end if;
   if not exists (select 1 from pg_policy where polname = 'perfis_delete') then
     execute 'create policy "perfis_delete" on perfis for delete to authenticated
-             using (id = auth.uid() or public.funcao_usuario() = ''admin'')';
+             using (false)';
   end if;
 end $$;
 

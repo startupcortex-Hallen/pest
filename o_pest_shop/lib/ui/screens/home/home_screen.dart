@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/helpers/categoria_icons.dart';
 import '../../../core/helpers/scale_helper.dart';
 import '../../../core/helpers/theme_colors.dart';
@@ -60,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _primeiroResume = false;
       return;
     }
-    context.read<HomeProvider>().refresh();
+    context.read<HomeProvider>().loadIfStale();
   }
 
   void _onProductScroll() {
@@ -217,6 +218,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final secoes = <_Secao>[];
+    final banners = home.banners;
+    if (banners.isNotEmpty) {
+      secoes.add(_Secao.custom((context) => Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+            child: _buildBannersSection(context, banners),
+          )));
+    }
     if (home.promocoes.isNotEmpty) {
       secoes.add(_Secao.custom((context) => Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.lg),
@@ -348,6 +356,85 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ─── OFERTAS RELÂMPAGO ──────────────────────────────
 
 
+
+  Widget _buildBannersSection(
+    BuildContext context,
+    List<Map<String, dynamic>> banners,
+  ) {
+    return SizedBox(
+      height: context.h(150).clamp(120.0, 180.0),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(horizontal: context.w(AppSpacing.md)),
+        itemCount: banners.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final b = banners[index];
+          return GestureDetector(
+            onTap: () => _abrirBanner(b),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.86,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: b['imagem_url'] as String? ?? '',
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        color: ThemeColors.surfaceVariant(context),
+                        child: const Icon(Icons.image_not_supported_rounded),
+                      ),
+                    ),
+                    if ((b['titulo'] as String?)?.trim().isNotEmpty == true)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(14, 24, 14, 12),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Colors.black87],
+                            ),
+                          ),
+                          child: Text(
+                            b['titulo'] as String,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _abrirBanner(Map<String, dynamic> banner) async {
+    final link = (banner['link_url'] as String?)?.trim() ?? '';
+    if (link.isEmpty) return;
+    if (link.startsWith('/')) {
+      context.push(link);
+      return;
+    }
+    final uri = Uri.tryParse(link);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   Widget _buildFlashOffersSection(HomeProvider home) {
     final produtos = home.promocoes;

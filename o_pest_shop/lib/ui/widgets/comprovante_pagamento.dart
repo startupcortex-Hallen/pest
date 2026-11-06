@@ -73,6 +73,8 @@ class ComprovantePagamento extends StatelessWidget {
         'Cartão: ${p.cartaoBandeira ?? ''} •••• ${p.cartaoLast4} (${p.parcelas}x)',
       if (p.cartaoAutorizacao != null) 'Autorização: ${p.cartaoAutorizacao}',
       if (p.motivoRecusa != null) 'Motivo: ${p.motivoRecusa}',
+      if (p.estornadoEm != null) 'Estornado em: ${_formatarDataHora(p.estornadoEm)}',
+      if (p.revisaoManual) 'REVISÃO MANUAL: ${p.revisaoMotivo ?? 'pedido não liberado'}',
       '====================================',
     ];
     return linhas.join('\n');
@@ -162,6 +164,26 @@ class ComprovantePagamento extends StatelessWidget {
                 style: const TextStyle(fontSize: 11, color: Color(0xFFF23D4F)),
               ),
             ),
+          if (p.revisaoManual)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF23D4F).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Revisão manual: ${p.revisaoMotivo ?? 'pagamento aprovado sem liberar o pedido.'}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFF23D4F),
+                ),
+              ),
+            ),
+          if (p.estornadoEm != null)
+            _linha(context, 'Estornado em', _formatarDataHora(p.estornadoEm)),
           const SizedBox(height: 8),
           Row(
             children: [
