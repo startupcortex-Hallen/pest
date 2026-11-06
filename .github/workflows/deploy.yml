@@ -42,6 +42,12 @@ jobs:
         working-directory: o_pest_shop
         run: flutter build web --release --base-href /pest/
 
+      - name: Incluir catálogo estático no build
+        working-directory: o_pest_shop
+        run: |
+          mkdir -p build/web/data
+          cp web/data/*.json build/web/data/ 2>/dev/null || true
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -94,6 +100,13 @@ jobs:
         if: steps.cloudflare.outputs.enabled == 'true'
         working-directory: o_pest_shop
         run: flutter build web --release --base-href /
+
+      - name: Incluir catálogo estático no build
+        if: steps.cloudflare.outputs.enabled == 'true'
+        working-directory: o_pest_shop
+        run: |
+          mkdir -p build/web/data
+          cp web/data/*.json build/web/data/ 2>/dev/null || true
 
       - name: Publicar no Cloudflare Pages
         if: steps.cloudflare.outputs.enabled == 'true'
