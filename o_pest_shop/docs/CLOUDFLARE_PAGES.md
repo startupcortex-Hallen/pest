@@ -9,6 +9,7 @@ geração do catálogo/imagens estáticas para tirar a navegação do Supabase.
 - CNAME `@` e `www` apontando para `o-pest-shop.pages.dev` (proxied).
 - Site respondendo em `https://opest.com.br` e `https://www.opest.com.br`.
 - Projeto Pages `o-pest-shop` na conta `4345815f0338f516307a8c3362fc7fe7`.
+- Custom domains `opest.com.br` e `www.opest.com.br` validados no Pages.
 - SSL/TLS em `Full`; `Always Use HTTPS` pode ser ativado no painel.
 
 ## 1. O que já está pronto no repositório
