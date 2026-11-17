@@ -259,12 +259,33 @@ Tabela `streaming_plans`:
 - ativo/inativo;
 - ordem.
 
-Foram criados 3 planos-modelo **inativos e com preço 0**:
-- O Pest+ Básico;
-- O Pest+ Padrão;
-- O Pest+ Premium.
+Plano principal ativo:
+- **O Pest+** — R$ 14,99 por mês, nível 1, mensal, 1 tela, HD.
+- Benefícios: 12 temporadas completas, 10 episódios por temporada, novos episódios antes e acesso no celular.
 
-O administrador deve definir preço e ativar antes de vender.
+O administrador pode criar outros planos e níveis pelo painel.
+
+### 6.2.1 Códigos de acesso
+
+Além da assinatura paga, o O Pest+ possui **códigos de acesso temporário**:
+- o fã resgata um código no app;
+- o acesso é liberado por 1 mês ou mais, sem cobrança;
+- cada código tem duração, limite de usos, validade e nível de acesso;
+- o administrador pode criar, editar, desativar e excluir códigos;
+- os códigos são pensados para sorteios e liberações manuais para fãs.
+
+Tabelas:
+- `streaming_access_codes`
+- `streaming_access_code_redemptions`
+
+Função:
+- `streaming_resgatar_codigo(text)`
+
+Tela do usuário:
+- **O Pest+ → Tenho um código de acesso → Resgatar**.
+
+Tela do admin:
+- **Séries → Assinaturas → Códigos de acesso**.
 
 ### 6.3 Assinaturas
 
@@ -303,6 +324,9 @@ No painel: **Séries → Assinaturas**.
 - Ativar/desativar plano.
 - Ver assinaturas e status.
 - Ativar ou cancelar manualmente para testes.
+- Criar/editar/desativar/excluir códigos de acesso.
+- Copiar código para enviar ao fã.
+- Acompanhar usos, duração e validade dos códigos.
 - O cancelamento manual **não** altera a cobrança no Mercado Pago; para isso use o painel do MP.
 
 Para marcar conteúdo exclusivo:
@@ -327,6 +351,8 @@ Para marcar conteúdo exclusivo:
 - `streaming_plans`
 - `streaming_subscriptions`
 - `streaming_subscription_events`
+- `streaming_access_codes`
+- `streaming_access_code_redemptions`
 
 ### 7.2 Views
 
@@ -338,10 +364,11 @@ Para marcar conteúdo exclusivo:
 
 - `streaming_set_updated_at()` — atualiza `updated_at`.
 - `streaming_preserva_conclusao()` — mantém episódio concluído.
-- `streaming_nivel_assinatura()` — nível máximo ativo do usuário (admin = 3).
+- `streaming_nivel_assinatura()` — nível máximo ativo do usuário (assinatura ou código; admin = 3).
 - `streaming_has_plan_level(nivel)` — verifica acesso ao nível.
 - `streaming_has_active_subscription()` — verifica assinatura ativa.
 - `streaming_contar_episodios(series_id)` — contagem pública de episódios.
+- `streaming_resgatar_codigo(text)` — resgata um código temporário com validações de uso, validade e duplicidade.
 
 ### 7.4 RLS
 
@@ -364,8 +391,6 @@ Para marcar conteúdo exclusivo:
    - catálogo, temporadas, episódios, progresso, favoritos, histórico, home config;
    - RLS, bucket, seed inicial.
 
-### Nova migration (pendente de aplicação no remoto)
-
 2. `supabase/migrations/20261113120000_streaming_assinaturas.sql`
    - planos;
    - assinaturas;
@@ -375,9 +400,14 @@ Para marcar conteúdo exclusivo:
    - funções de entitlement;
    - atualização da policy de episódios;
    - view de catálogo atualizada;
-   - planos-modelo.
+   - plano O Pest+ de R$ 14,99/mês;
+   - códigos de acesso temporário;
+   - seed de 12 temporadas x 10 episódios;
+   - realtime de séries/temporadas/episódios.
 
-Para aplicar:
+Status: **aplicadas no projeto remoto**.
+
+Para reaplicar em outro ambiente:
 
 ```bash
 cd o_pest_shop
@@ -401,14 +431,22 @@ Série criada:
 - Status: publicado
 - Destaque: sim
 - Categoria: Websérie
-- Temporadas:
-  - 1ª temporada — Episódio 1 — `PHVQ17ifaWo`
-  - 5ª temporada — Episódio 1 — `VYVevDrfSeg`
+- Acesso: exclusivo O Pest+ (nível 1)
+- **12 temporadas**
+- **10 episódios por temporada = 120 episódios**
+
+Os links dos episódios são **placeholders públicos do YouTube** para teste.
+O administrador deve substituí-los pelos vídeos oficiais.
 
 Capas iniciais usam thumbnails do YouTube derivadas dos próprios vídeos.
 O administrador pode substituir por artes oficiais.
 
-> Observação importante: durante os testes no emulador Android, os dois vídeos fornecidos retornaram restrição de incorporação/disponibilidade do YouTube. O player trata o erro corretamente, mas esses vídeos específicos não tocam dentro do app. Para reprodução interna, use vídeos que permitam incorporação ou habilite a opção no YouTube Studio.
+> Observação importante sobre vídeos: vídeos **privados** do YouTube normalmente
+> não podem ser incorporados em aplicativos de terceiros. Para o player funcionar,
+> use vídeos **não listados** (unlisted) ou públicos e confirme no YouTube Studio
+> que a opção de incorporação está habilitada. Durante os testes no emulador, alguns
+> links de teste retornaram restrição de incorporação; o player exibe o aviso,
+> permite tentar novamente e oferece “Abrir no YouTube”.
 
 ---
 
@@ -534,6 +572,17 @@ A importação em lote foi criada especialmente para receber a lista completa de
 2. Nome, slug, preço, período, nível, teste, telas, qualidade, benefícios.
 3. Ativar o plano.
 4. Só planos ativos com preço > 0 aparecem para assinatura.
+5. Plano inicial configurado: **O Pest+ — R$ 14,99/mês**.
+
+### Códigos de acesso O Pest+
+1. Séries → Assinaturas → Códigos de acesso → Novo código.
+2. O sistema gera um código no formato `PEST-XXXX-XXXX`.
+3. Definir duração em dias, usos máximos, validade, nível e observação.
+4. Ativar o código.
+5. Copiar o código e enviar para o fã.
+6. O fã resgata em **O Pest+ → Tenho um código de acesso**.
+7. O acesso fica liberado até a data de expiração.
+8. Códigos podem ser desativados ou excluídos a qualquer momento.
 
 ---
 
@@ -566,28 +615,30 @@ flutter build apk --debug
 Resultado atual: **sucesso**.
 
 ### Testes remotos
-- Migration `20261112120000` aplicada no Supabase.
-- Dados iniciais verificados via REST.
-- Leitura pública confirmada.
-- Escrita anônima bloqueada.
-- Migration de assinaturas ainda pendente.
+- Migrations `20261112120000` e `20261113120000` aplicadas no Supabase.
+- 12 temporadas e 120 episódios confirmados no banco.
+- Plano O Pest+ ativo a R$ 14,99/mês.
+- Código de acesso de teste criado e resgatado com sucesso no app.
+- Paywall, desbloqueio por código, 12 temporadas, episódios e player testados no emulador Android.
+- Leitura pública confirmada; escrita anônima bloqueada.
+- Realtime de episódios incluído; atualização de link reflete no detalhe/player.
+- Combinações de links do YouTube variam: alguns vídeos retornam restrição de incorporação (tratada pelo app).
 - Teste real do Mercado Pago depende de credenciais e webhook configurados.
 
 ---
 
 ## 13. Pendências e próximos passos
 
-1. Aplicar `20261113120000_streaming_assinaturas.sql`.
-2. Configurar secrets do Mercado Pago.
-3. Deploy de `mp-subscription` e `mp-webhook`.
-4. Cadastrar o webhook no painel do Mercado Pago.
-5. Editar os 3 planos-modelo: definir preço, revisar benefícios e ativar.
-6. Marcar a série/versão alternativa com nível de acesso > 0.
-7. Testar o ciclo completo em sandbox do Mercado Pago.
-8. Substituir os vídeos de teste por vídeos que permitam incorporação.
-9. Quando a lista oficial de links chegar, usar **Séries → Episódios → Importar links** por temporada.
-10. Opcional: perfis por conta, downloads offline, notificações, recomendação e Top 10.
-10. Opcional: limpeza automática de imagens no Storage ao excluir registros.
+1. Configurar secrets do Mercado Pago.
+2. Deploy de `mp-subscription` e `mp-webhook`.
+3. Cadastrar o webhook no painel do Mercado Pago.
+4. Testar o ciclo completo de assinatura em sandbox do Mercado Pago.
+5. Substituir os links de teste pelos vídeos oficiais.
+6. Usar **Séries → Episódios → Importar links** quando a lista oficial de links chegar.
+7. Confirmar que os vídeos são **não listados/públicos** e permitem incorporação; vídeos privados normalmente não tocam no iframe.
+8. Opcional: perfis por conta, downloads offline, notificações, recomendação e Top 10.
+9. Opcional: limpeza automática de imagens no Storage ao excluir registros.
+10. Remover ou alterar a senha das contas de teste criadas no ambiente.
 
 ---
 

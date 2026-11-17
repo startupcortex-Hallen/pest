@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/helpers/streaming_format.dart';
 import '../../../core/helpers/theme_colors.dart';
@@ -35,8 +38,63 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
   bool _abrindoPlayer = false;
   bool _bloqueado = false;
   String? _erro;
+  RealtimeChannel? _realtime;
+  Timer? _realtimeDebounce;
+  bool _realtimeAssinado = false;
 
   String? get _usuarioAtual => context.read<AuthProvider>().user?.id;
+
+  void _assinarRealtime() {
+    if (_realtimeAssinado) return;
+    _realtimeAssinado = true;
+    _realtime = Supabase.instance.client
+        .channel('streaming_detail_${widget.seriesId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'streaming_episodes',
+          callback: (payload) {
+            final selecionada = _temporadaSelecionada?.id;
+            final nova = payload.newRecord['season_id']?.toString();
+            final antiga = payload.oldRecord['season_id']?.toString();
+            if (selecionada == null ||
+                nova == selecionada ||
+                antiga == selecionada) {
+              _agendarRecarga();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'streaming_seasons',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'series_id',
+            value: widget.seriesId,
+          ),
+          callback: (_) => _agendarRecarga(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'streaming_series',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: widget.seriesId,
+          ),
+          callback: (_) => _agendarRecarga(),
+        )
+        .subscribe();
+  }
+
+  void _agendarRecarga() {
+    _realtimeDebounce?.cancel();
+    _realtimeDebounce = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) _carregar();
+    });
+  }
 
   @override
   void initState() {
@@ -49,9 +107,17 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _realtimeDebounce?.cancel();
+    _realtime?.unsubscribe();
+    super.dispose();
+  }
+
   Future<void> _carregar() async {
     final usuarioId = _usuarioAtual;
     final provider = context.read<StreamingProvider>();
+    await Future<void>.delayed(Duration.zero);
     await provider.loadIfStale();
     await provider.waitUntilLoaded();
 
@@ -81,6 +147,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
           _bloqueado = true;
           _loading = false;
         });
+        _assinarRealtime();
         return;
       }
 
@@ -91,7 +158,16 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
         progressos = await _service.fetchProgressForSeries(usuarioId, serie.id);
       }
 
-      final selecionada = temporadas.isEmpty ? null : temporadas.first;
+      StreamingSeason? selecionada;
+      if (_temporadaSelecionada != null) {
+        for (final temporada in temporadas) {
+          if (temporada.id == _temporadaSelecionada!.id) {
+            selecionada = temporada;
+            break;
+          }
+        }
+      }
+      selecionada ??= temporadas.isEmpty ? null : temporadas.first;
       final episodios = selecionada == null
           ? <StreamingEpisode>[]
           : await _service.fetchEpisodes(selecionada.id);
@@ -107,6 +183,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
         _bloqueado = false;
         _loading = false;
       });
+      _assinarRealtime();
     } catch (e) {
       if (!mounted) return;
       setState(() {

@@ -47,6 +47,7 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
   YoutubePlayerController? _controller;
   StreamSubscription<YoutubePlayerValue>? _valueSub;
   StreamSubscription<YoutubeVideoState>? _posicaoSub;
+  RealtimeChannel? _realtimeEpisodio;
 
   Timer? _contador;
   int _segundosRestantes = 0;
@@ -104,6 +105,7 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
 
     try {
       final provider = context.read<StreamingProvider>();
+      await Future<void>.delayed(Duration.zero);
       await provider.loadIfStale();
       await provider.waitUntilLoaded();
 
@@ -151,6 +153,7 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
         _proximo = vizinhos.next;
         _loading = false;
       });
+      _assinarRealtimeEpisodio(episodio);
 
       if (_deveOferecerRetomada(progresso)) {
         final segundos = await _mostrarRetomada(progresso!);
@@ -166,6 +169,66 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
         _loading = false;
       });
     }
+  }
+
+  void _assinarRealtimeEpisodio(StreamingEpisode episodio) {
+    _realtimeEpisodio?.unsubscribe();
+    _realtimeEpisodio = Supabase.instance.client
+        .channel('streaming_episode_${episodio.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'streaming_episodes',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: episodio.id,
+          ),
+          callback: (payload) {
+            if (!mounted) return;
+            final status = payload.newRecord['status']?.toString();
+            if (status != null &&
+                status != 'publicado' &&
+                status != 'agendado') {
+              setState(() {
+                _erro = 'Este episódio não está mais disponível.';
+              });
+              _destruirPlayer();
+              return;
+            }
+            final novoVideo = payload.newRecord['youtube_video_id']?.toString();
+            if (novoVideo != null && novoVideo != _episodio?.youtubeVideoId) {
+              unawaited(_salvarProgresso());
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'O administrador atualizou o link deste episódio. '
+                    'Recarregando...',
+                  ),
+                ),
+              );
+              _carregar();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'streaming_episodes',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: episodio.id,
+          ),
+          callback: (_) {
+            if (!mounted) return;
+            setState(() {
+              _erro = 'Este episódio foi removido do catálogo.';
+            });
+            _destruirPlayer();
+          },
+        )
+        .subscribe();
   }
 
   bool _deveOferecerRetomada(StreamingWatchProgress? progresso) {
@@ -235,6 +298,9 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
         strictRelatedVideos: true,
         privacyEnhancedMode: false,
         videoStateUpdateInterval: 1000,
+        userAgent:
+            'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
       ),
     );
 
@@ -483,6 +549,7 @@ class _EpisodePlayerScreenState extends State<EpisodePlayerScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _contador?.cancel();
+    _realtimeEpisodio?.unsubscribe();
     unawaited(_salvarProgresso());
     _destruirPlayer();
     unawaited(_restaurarOrientacao());

@@ -35,6 +35,9 @@ class _YoutubePreviewDialogState extends State<YoutubePreviewDialog> {
         enableCaption: false,
         strictRelatedVideos: true,
         videoStateUpdateInterval: 500,
+        userAgent:
+            'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
       ),
     );
     _subscription = _controller.stream.listen((value) {

@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/helpers/streaming_format.dart';
 import '../../../../core/helpers/theme_colors.dart';
@@ -28,6 +31,7 @@ class _StreamingTabState extends State<StreamingTab> {
   List<Map<String, dynamic>> _episodios = [];
   List<Map<String, dynamic>> _planos = [];
   List<Map<String, dynamic>> _assinaturas = [];
+  List<Map<String, dynamic>> _codigos = [];
   Map<String, Map<String, int>> _contagensSeries = {};
   List<StreamingHomeSection> _secoes = List<StreamingHomeSection>.from(
     StreamingHomeConfig.secoesPadrao,
@@ -94,9 +98,11 @@ class _StreamingTabState extends State<StreamingTab> {
 
       var planos = <Map<String, dynamic>>[];
       var assinaturas = <Map<String, dynamic>>[];
+      var codigos = <Map<String, dynamic>>[];
       try {
         planos = await _service.fetchPlanosAdmin();
         assinaturas = await _service.fetchAssinaturasAdmin();
+        codigos = await _service.fetchCodigosAcesso();
       } catch (e) {
         debugPrint('Erro ao carregar assinaturas admin: $e');
       }
@@ -108,6 +114,7 @@ class _StreamingTabState extends State<StreamingTab> {
         _episodios = episodios;
         _planos = planos;
         _assinaturas = assinaturas;
+        _codigos = codigos;
         _contagensSeries = {
           for (final item in contagens)
             if (item['series_id'] != null)
@@ -1451,6 +1458,207 @@ class _StreamingTabState extends State<StreamingTab> {
     }
   }
 
+  String _gerarCodigo() {
+    const letras = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = Random.secure();
+    String bloco() =>
+        List.generate(4, (_) => letras[random.nextInt(letras.length)]).join();
+    return 'PEST-${bloco()}-${bloco()}';
+  }
+
+  String? _dataIsoCodigo(String texto) {
+    final limpo = texto.trim();
+    if (limpo.isEmpty) return null;
+    final partes = limpo.split('/');
+    if (partes.length == 3) {
+      final dia = int.tryParse(partes[0]);
+      final mes = int.tryParse(partes[1]);
+      final ano = int.tryParse(partes[2]);
+      if (dia != null && mes != null && ano != null) {
+        return DateTime.utc(ano, mes, dia).toIso8601String();
+      }
+    }
+    return DateTime.tryParse(limpo)?.toUtc().toIso8601String();
+  }
+
+  Future<void> _abrirFormularioCodigo([Map<String, dynamic>? codigo]) async {
+    final codigoCtrl = TextEditingController(
+      text: codigo?['codigo']?.toString() ?? _gerarCodigo(),
+    );
+    final duracaoCtrl = TextEditingController(
+      text: codigo?['duracao_dias']?.toString() ?? '30',
+    );
+    final usosCtrl = TextEditingController(
+      text: codigo?['usos_maximos']?.toString() ?? '1',
+    );
+    final expiraCtrl = TextEditingController(
+      text: codigo?['expira_em'] == null
+          ? ''
+          : formatarDataStreaming(
+              DateTime.tryParse(codigo!['expira_em'].toString()),
+            ),
+    );
+    final obsCtrl = TextEditingController(
+      text: codigo?['observacao']?.toString() ?? '',
+    );
+    var nivel = (codigo?['plano_nivel'] as num?)?.toInt() ?? 1;
+    var ativo = codigo?['ativo'] != false;
+
+    final salvar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: Text(codigo == null ? 'Novo código' : 'Editar código'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: codigoCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Código',
+                      hintText: 'PEST-XXXX-XXXX',
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: duracaoCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Duração (dias)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: usosCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Usos máximos',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  DropdownButtonFormField<int>(
+                    initialValue: nivel,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Nível liberado',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 1, child: Text('1 — O Pest+')),
+                      DropdownMenuItem(value: 2, child: Text('2 — Superior')),
+                      DropdownMenuItem(value: 3, child: Text('3 — Premium')),
+                    ],
+                    onChanged: (valor) => setDialog(() => nivel = valor ?? 1),
+                  ),
+                  TextField(
+                    controller: expiraCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Validade do código',
+                      hintText: 'dd/mm/aaaa',
+                    ),
+                  ),
+                  TextField(
+                    controller: obsCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Observação (ex.: sorteio do Instagram)',
+                    ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: ativo,
+                    onChanged: (valor) => setDialog(() => ativo = valor),
+                    title: const Text('Código ativo'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (salvar != true) return;
+    final textoCodigo = codigoCtrl.text.trim().toUpperCase();
+    if (textoCodigo.isEmpty) {
+      _snack('Informe o código.');
+      return;
+    }
+    final duracao = int.tryParse(duracaoCtrl.text.trim()) ?? 0;
+    final usos = int.tryParse(usosCtrl.text.trim()) ?? 0;
+    if (duracao <= 0 || usos <= 0) {
+      _snack('Duração e usos devem ser maiores que zero.');
+      return;
+    }
+
+    try {
+      await _service.salvarCodigoAcesso({
+        'codigo': textoCodigo,
+        'plano_nivel': nivel,
+        'duracao_dias': duracao,
+        'usos_maximos': usos,
+        'ativo': ativo,
+        'expira_em': _dataIsoCodigo(expiraCtrl.text),
+        'observacao': obsCtrl.text.trim().isEmpty ? null : obsCtrl.text.trim(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, id: codigo?['id']?.toString());
+      _carregar();
+    } catch (e) {
+      _snack(mapErroAdmin(e));
+    }
+  }
+
+  Future<void> _desativarCodigo(Map<String, dynamic> codigo) async {
+    try {
+      await _service.salvarCodigoAcesso({
+        'ativo': false,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, id: codigo['id']?.toString());
+      _carregar();
+    } catch (e) {
+      _snack(mapErroAdmin(e));
+    }
+  }
+
+  Future<void> _excluirCodigo(Map<String, dynamic> codigo) async {
+    final confirmar = await _confirmarExclusaoCritica(
+      titulo: 'Excluir código',
+      mensagem:
+          'O código "${codigo['codigo']}" e os acessos temporários vinculados '
+          'serão removidos. Digite EXCLUIR para confirmar.',
+    );
+    if (!confirmar) return;
+    try {
+      await _service.excluirCodigoAcesso(codigo['id']?.toString() ?? '');
+      _carregar();
+    } catch (e) {
+      _snack(mapErroAdmin(e));
+    }
+  }
+
+  Future<void> _copiarCodigo(String codigo) async {
+    await Clipboard.setData(ClipboardData(text: codigo));
+    _snack('Código copiado: $codigo');
+  }
+
   Widget _assinaturasTab() {
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -1567,6 +1775,147 @@ class _StreamingTabState extends State<StreamingTab> {
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'editar', child: Text('Editar')),
                     PopupMenuItem(value: 'excluir', child: Text('Excluir')),
+                  ],
+                ),
+              ),
+            );
+          }),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Códigos de acesso',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _abrirFormularioCodigo(),
+              icon: const Icon(Icons.add_rounded, size: 16),
+              label: const Text('Novo código'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Códigos liberam acesso temporário sem cobrança. '
+          'Use para sorteios e fãs.',
+          style: TextStyle(
+            fontSize: 11,
+            color: ThemeColors.secondaryText(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (_codigos.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Center(
+              child: Text(
+                'Nenhum código cadastrado.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          )
+        else
+          ..._codigos.map((codigo) {
+            final ativo = codigo['ativo'] == true;
+            final expira = DateTime.tryParse(
+              codigo['expira_em']?.toString() ?? '',
+            );
+            final expirado = expira != null && expira.isBefore(DateTime.now());
+            final usos = (codigo['usos'] as num?)?.toInt() ?? 0;
+            final maxUsos = (codigo['usos_maximos'] as num?)?.toInt() ?? 0;
+            final cor = ativo && !expirado
+                ? ThemeColors.success(context)
+                : ThemeColors.error(context);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: ThemeColors.surface(context),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: ThemeColors.outline(context).withValues(alpha: 0.6),
+                ),
+              ),
+              child: ListTile(
+                onTap: () => _abrirFormularioCodigo(codigo),
+                leading: Icon(
+                  Icons.confirmation_number_rounded,
+                  color: cor,
+                  size: 22,
+                ),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        codigo['codigo']?.toString() ?? 'CÓDIGO',
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Copiar',
+                      onPressed: () =>
+                          _copiarCodigo(codigo['codigo']?.toString() ?? ''),
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                    ),
+                  ],
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Wrap(
+                    spacing: 5,
+                    runSpacing: 3,
+                    children: [
+                      StreamingBadge(
+                        label: ativo && !expirado ? 'ATIVO' : 'INATIVO',
+                        color: cor,
+                      ),
+                      StreamingBadge(
+                        label: 'N${codigo['plano_nivel'] ?? 1}',
+                        color: ThemeColors.primary(context),
+                      ),
+                      StreamingBadge(
+                        label: '${codigo['duracao_dias'] ?? 30} DIAS',
+                        color: ThemeColors.secondaryText(context),
+                      ),
+                      StreamingBadge(
+                        label: '$usos/$maxUsos USOS',
+                        color: ThemeColors.secondaryText(context),
+                      ),
+                      if (expira != null)
+                        StreamingBadge(
+                          label: 'ATÉ ${formatarDataStreaming(expira)}',
+                          color: ThemeColors.secondaryText(context),
+                        ),
+                    ],
+                  ),
+                ),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (acao) {
+                    if (acao == 'editar') {
+                      _abrirFormularioCodigo(codigo);
+                    } else if (acao == 'desativar') {
+                      _desativarCodigo(codigo);
+                    } else if (acao == 'excluir') {
+                      _excluirCodigo(codigo);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'editar', child: Text('Editar')),
+                    if (ativo)
+                      const PopupMenuItem(
+                        value: 'desativar',
+                        child: Text('Desativar'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'excluir',
+                      child: Text('Excluir'),
+                    ),
                   ],
                 ),
               ),

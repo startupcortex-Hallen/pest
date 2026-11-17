@@ -174,6 +174,33 @@ class StreamingAdminService {
     return _list(resposta);
   }
 
+  Future<List<Map<String, dynamic>>> fetchCodigosAcesso() async {
+    final resposta = await _client
+        .from('streaming_access_codes')
+        .select()
+        .order('created_at', ascending: false)
+        .limit(200);
+    return _list(resposta);
+  }
+
+  Future<void> salvarCodigoAcesso(
+    Map<String, dynamic> dados, {
+    String? id,
+  }) async {
+    if (id == null) {
+      await _client.from('streaming_access_codes').insert(dados);
+    } else {
+      await _client
+          .from('streaming_access_codes')
+          .update(dados)
+          .eq('id', id);
+    }
+  }
+
+  Future<void> excluirCodigoAcesso(String id) async {
+    await _client.from('streaming_access_codes').delete().eq('id', id);
+  }
+
   Future<void> atualizarStatusAssinatura(
     String id,
     String status, {

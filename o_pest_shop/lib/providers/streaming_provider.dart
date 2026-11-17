@@ -24,6 +24,8 @@ class StreamingProvider extends ChangeNotifier {
         _continueWatching = const [];
         _favorites = <String>{};
         _subscription = null;
+        _nivelAcesso = 0;
+        _codigoExpiraEm = null;
         _isAdmin = false;
         _loadedUserId = id;
         _lastLoaded = null;
@@ -43,6 +45,8 @@ class StreamingProvider extends ChangeNotifier {
   Set<String> _favorites = {};
   List<StreamingPlan> _plans = [];
   StreamingSubscription? _subscription;
+  int _nivelAcesso = 0;
+  DateTime? _codigoExpiraEm;
   StreamingHomeConfig _homeConfig = StreamingHomeConfig.padrao();
   StreamingSeries? _hero;
   StreamingSeriesStats _heroStats = const StreamingSeriesStats();
@@ -63,6 +67,8 @@ class StreamingProvider extends ChangeNotifier {
   Set<String> get favorites => _favorites;
   List<StreamingPlan> get plans => _plans;
   StreamingSubscription? get subscription => _subscription;
+  int get nivelAcesso => _nivelAcesso;
+  DateTime? get codigoExpiraEm => _codigoExpiraEm;
   StreamingHomeConfig get homeConfig => _homeConfig;
   StreamingSeries? get hero => _hero;
   StreamingSeriesStats get heroStats => _heroStats;
@@ -71,17 +77,14 @@ class StreamingProvider extends ChangeNotifier {
   String? get error => _error;
   String? get userId => _authService.currentUser?.id;
   bool get isLoggedIn => userId != null;
-  bool get isSubscriber => _subscription?.ativa == true;
+  bool get isSubscriber => _nivelAcesso > 0;
 
   bool isFavorite(String seriesId) => _favorites.contains(seriesId);
 
   bool canAccess(int requiredPlanLevel) {
     if (requiredPlanLevel <= 0) return true;
     if (_isAdmin) return true;
-    final assinatura = _subscription;
-    return assinatura != null &&
-        assinatura.ativa &&
-        assinatura.planNivel >= requiredPlanLevel;
+    return _nivelAcesso >= requiredPlanLevel;
   }
 
   Future<void> loadIfStale() async {
@@ -137,6 +140,8 @@ class StreamingProvider extends ChangeNotifier {
       var continueAssistindo = <ContinueWatchingItem>[];
       var favoritos = <String>{};
       StreamingSubscription? assinatura;
+      var nivelAcesso = 0;
+      DateTime? codigoExpiraEm;
       var isAdmin = false;
       if (usuarioAtual != null) {
         continueAssistindo = await _service.fetchContinueWatching(usuarioAtual);
@@ -145,6 +150,13 @@ class StreamingProvider extends ChangeNotifier {
           assinatura = await _subscriptionService.fetchMinhaAssinatura();
         } catch (e) {
           debugPrint('Erro ao carregar assinatura: $e');
+        }
+        try {
+          nivelAcesso = await _subscriptionService.fetchNivelAcesso();
+          codigoExpiraEm = await _subscriptionService
+              .fetchCodigoAtivoExpiraEm();
+        } catch (e) {
+          debugPrint('Erro ao carregar nível de acesso: $e');
         }
         try {
           final perfil = await _authService.getProfile(usuarioAtual);
@@ -178,6 +190,8 @@ class StreamingProvider extends ChangeNotifier {
       _favorites = favoritos;
       _plans = planos;
       _subscription = assinatura;
+      _nivelAcesso = isAdmin ? 3 : nivelAcesso;
+      _codigoExpiraEm = codigoExpiraEm;
       _isAdmin = isAdmin;
 
       var destaques = series.where((item) => item.isFeatured).toList();
@@ -229,6 +243,8 @@ class StreamingProvider extends ChangeNotifier {
       _continueWatching = const [];
       _favorites = <String>{};
       _subscription = null;
+      _nivelAcesso = 0;
+      _codigoExpiraEm = null;
       _notify();
       return;
     }
@@ -236,6 +252,10 @@ class StreamingProvider extends ChangeNotifier {
       _continueWatching = await _service.fetchContinueWatching(usuarioId);
       _favorites = await _service.fetchFavoriteSeriesIds(usuarioId);
       _subscription = await _subscriptionService.fetchMinhaAssinatura();
+      _nivelAcesso = _isAdmin
+          ? 3
+          : await _subscriptionService.fetchNivelAcesso();
+      _codigoExpiraEm = await _subscriptionService.fetchCodigoAtivoExpiraEm();
     } catch (e) {
       debugPrint('Erro refreshUserData streaming: $e');
     }
@@ -245,11 +265,23 @@ class StreamingProvider extends ChangeNotifier {
   Future<void> refreshSubscription() async {
     if (userId == null) {
       _subscription = null;
+      _nivelAcesso = 0;
+      _codigoExpiraEm = null;
       _notify();
       return;
     }
     _subscription = await _subscriptionService.fetchMinhaAssinatura();
+    _nivelAcesso = _isAdmin ? 3 : await _subscriptionService.fetchNivelAcesso();
+    _codigoExpiraEm = await _subscriptionService.fetchCodigoAtivoExpiraEm();
     _notify();
+  }
+
+  Future<Map<String, dynamic>> resgatarCodigo(String codigo) async {
+    final resultado = await _subscriptionService.resgatarCodigo(codigo);
+    _nivelAcesso = _isAdmin ? 3 : await _subscriptionService.fetchNivelAcesso();
+    _codigoExpiraEm = await _subscriptionService.fetchCodigoAtivoExpiraEm();
+    _notify();
+    return resultado;
   }
 
   Future<bool> toggleFavorite(String seriesId) async {
@@ -300,6 +332,8 @@ class StreamingProvider extends ChangeNotifier {
     } else {
       _subscription = null;
     }
+    _nivelAcesso = _isAdmin ? 3 : await _subscriptionService.fetchNivelAcesso();
+    _codigoExpiraEm = await _subscriptionService.fetchCodigoAtivoExpiraEm();
     _notify();
     return _subscription;
   }
@@ -307,6 +341,8 @@ class StreamingProvider extends ChangeNotifier {
   Future<void> cancelarAssinatura() async {
     await _subscriptionService.cancelarAssinatura();
     _subscription = await _subscriptionService.fetchMinhaAssinatura();
+    _nivelAcesso = _isAdmin ? 3 : await _subscriptionService.fetchNivelAcesso();
+    _codigoExpiraEm = await _subscriptionService.fetchCodigoAtivoExpiraEm();
     _notify();
   }
 

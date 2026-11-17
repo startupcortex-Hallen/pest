@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/helpers/streaming_format.dart';
@@ -21,9 +22,11 @@ class StreamingSubscriptionScreen extends StatefulWidget {
 class _StreamingSubscriptionScreenState
     extends State<StreamingSubscriptionScreen>
     with WidgetsBindingObserver {
+  final _codigoCtrl = TextEditingController();
   bool _processando = false;
   bool _verificando = false;
   bool _checkoutAberto = false;
+  bool _resgatandoCodigo = false;
   String? _planoProcessando;
 
   @override
@@ -38,6 +41,7 @@ class _StreamingSubscriptionScreenState
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _codigoCtrl.dispose();
     super.dispose();
   }
 
@@ -83,6 +87,56 @@ class _StreamingSubscriptionScreenState
       throw StateError('Não foi possível abrir o Mercado Pago.');
     }
     _checkoutAberto = true;
+  }
+
+  String _mensagemErro(Object e) {
+    if (e is PostgrestException) return e.message;
+    if (e is StateError) return e.message;
+    return e.toString();
+  }
+
+  Future<void> _resgatarCodigo() async {
+    final provider = context.read<StreamingProvider>();
+    if (!provider.isLoggedIn) {
+      context.push('/login');
+      return;
+    }
+    final codigo = _codigoCtrl.text.trim();
+    if (codigo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Digite o código de acesso.')),
+      );
+      return;
+    }
+    if (_resgatandoCodigo) return;
+
+    setState(() => _resgatandoCodigo = true);
+    try {
+      final resultado = await provider.resgatarCodigo(codigo);
+      if (!mounted) return;
+      final expira = DateTime.tryParse(
+        resultado['expires_at']?.toString() ?? '',
+      );
+      _codigoCtrl.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            expira == null
+                ? 'Código resgatado! O conteúdo exclusivo foi liberado.'
+                : 'Código resgatado! Acesso liberado até '
+                      '${formatarDataStreaming(expira)}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_mensagemErro(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _resgatandoCodigo = false);
+    }
   }
 
   Future<void> _assinar(StreamingPlan plano) async {
@@ -255,6 +309,7 @@ class _StreamingSubscriptionScreenState
             if (!provider.isLoggedIn) _loginCard(),
             if (provider.isLoggedIn && assinatura != null)
               _assinaturaCard(provider, assinatura),
+            if (provider.isLoggedIn) _codigoCard(provider),
             const SizedBox(height: 16),
             Text(
               'Planos',
@@ -390,6 +445,103 @@ class _StreamingSubscriptionScreenState
           TextButton(
             onPressed: () => context.push('/login'),
             child: const Text('Entrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _codigoCard(StreamingProvider provider) {
+    final expira = provider.codigoExpiraEm;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ThemeColors.surface(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: expira != null
+              ? ThemeColors.success(context).withValues(alpha: 0.5)
+              : ThemeColors.outline(context).withValues(alpha: 0.7),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.confirmation_number_outlined,
+                color: expira != null
+                    ? ThemeColors.success(context)
+                    : ThemeColors.primary(context),
+                size: 21,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  expira != null
+                      ? 'Acesso por código ativo'
+                      : 'Tenho um código de acesso',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          if (expira != null) ...[
+            const SizedBox(height: 5),
+            Text(
+              'Seu acesso temporário vai até '
+              '${formatarDataStreaming(expira)}.',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: ThemeColors.success(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Códigos são distribuídos pelo O Pest para fãs assistirem '
+                'por 1 mês ou mais, sem assinatura.',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: ThemeColors.secondaryText(context),
+                  height: 1.35,
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _codigoCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Código',
+                    hintText: 'PEST-XXXX-XXXX',
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _resgatarCodigo(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _resgatandoCodigo ? null : _resgatarCodigo,
+                child: _resgatandoCodigo
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('Resgatar'),
+              ),
+            ],
           ),
         ],
       ),

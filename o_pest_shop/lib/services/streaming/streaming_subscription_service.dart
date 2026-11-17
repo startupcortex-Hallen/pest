@@ -83,4 +83,45 @@ class StreamingSubscriptionService {
     if (data is Map) return Map<String, dynamic>.from(data);
     throw StateError('Resposta inválida do servidor de assinaturas.');
   }
+
+  Future<int> fetchNivelAcesso() async {
+    if (_client.auth.currentUser == null) return 0;
+    try {
+      final resposta = await _client.rpc('streaming_nivel_assinatura');
+      if (resposta is num) return resposta.toInt();
+      return int.tryParse(resposta?.toString() ?? '') ?? 0;
+    } catch (e) {
+      debugPrint('Erro fetchNivelAcesso: $e');
+      return 0;
+    }
+  }
+
+  Future<DateTime?> fetchCodigoAtivoExpiraEm() async {
+    final usuarioId = _client.auth.currentUser?.id;
+    if (usuarioId == null) return null;
+    try {
+      final resposta = await _client
+          .from('streaming_access_code_redemptions')
+          .select('expires_at')
+          .eq('user_id', usuarioId)
+          .gt('expires_at', DateTime.now().toUtc().toIso8601String())
+          .order('expires_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (resposta == null) return null;
+      return DateTime.tryParse(resposta['expires_at']?.toString() ?? '');
+    } catch (e) {
+      debugPrint('Erro fetchCodigoAtivoExpiraEm: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> resgatarCodigo(String codigo) async {
+    final resposta = await _client.rpc(
+      'streaming_resgatar_codigo',
+      params: {'p_codigo': codigo.trim()},
+    );
+    if (resposta is Map) return Map<String, dynamic>.from(resposta);
+    throw StateError('Resposta inválida ao resgatar o código.');
+  }
 }
