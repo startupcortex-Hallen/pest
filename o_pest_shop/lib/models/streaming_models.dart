@@ -109,6 +109,7 @@ class StreamingSeason {
   final DateTime? releaseDate;
   final String status;
   final int displayOrder;
+  final int requiredPlanLevel;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -122,6 +123,7 @@ class StreamingSeason {
     this.releaseDate,
     this.status = 'rascunho',
     this.displayOrder = 0,
+    this.requiredPlanLevel = 0,
     this.createdAt,
     this.updatedAt,
   });
@@ -143,6 +145,7 @@ class StreamingSeason {
       releaseDate: _data(json['release_date']),
       status: _texto(json['status']) ?? 'rascunho',
       displayOrder: _inteiro(json['display_order']) ?? 0,
+      requiredPlanLevel: _inteiro(json['required_plan_level']) ?? 0,
       createdAt: _data(json['created_at']),
       updatedAt: _data(json['updated_at']),
     );

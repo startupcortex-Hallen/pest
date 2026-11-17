@@ -33,6 +33,7 @@ class _StreamingSeasonFormScreenState extends State<StreamingSeasonFormScreen> {
   late String _seriesId;
   late String _status;
   late String _capa;
+  late int _nivelPlano;
   bool _salvando = false;
 
   bool get _editando => widget.temporada != null;
@@ -56,6 +57,7 @@ class _StreamingSeasonFormScreenState extends State<StreamingSeasonFormScreen> {
     );
     _status = t?['status']?.toString() ?? 'rascunho';
     _capa = t?['cover_url']?.toString() ?? '';
+    _nivelPlano = (t?['required_plan_level'] as num?)?.toInt() ?? 0;
     _seriesId =
         t?['series_id']?.toString() ??
         widget.seriesInicialId ??
@@ -123,6 +125,7 @@ class _StreamingSeasonFormScreenState extends State<StreamingSeasonFormScreen> {
         'display_order': int.tryParse(_ordem.text.trim()) ?? 0,
         'status': _status,
         'cover_url': _capa.trim().isEmpty ? null : _capa.trim(),
+        'required_plan_level': _nivelPlano,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
 
@@ -277,6 +280,21 @@ class _StreamingSeasonFormScreenState extends State<StreamingSeasonFormScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<int>(
+              initialValue: _nivelPlano,
+              decoration: adminInputDec(context, 'Acesso à temporada').copyWith(
+                helperText:
+                    '0 = grátis. 1/2/3 = exige O Pest+ com nível igual ou superior.',
+              ),
+              items: const [
+                DropdownMenuItem(value: 0, child: Text('Grátis / público')),
+                DropdownMenuItem(value: 1, child: Text('Exclusivo — O Pest+')),
+                DropdownMenuItem(value: 2, child: Text('Exclusivo — nível 2')),
+                DropdownMenuItem(value: 3, child: Text('Exclusivo — nível 3')),
+              ],
+              onChanged: (valor) => setState(() => _nivelPlano = valor ?? 0),
             ),
             const Divider(height: 30),
             const StreamingAdminSectionTitle(

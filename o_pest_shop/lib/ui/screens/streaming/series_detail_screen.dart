@@ -168,7 +168,9 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
         }
       }
       selecionada ??= temporadas.isEmpty ? null : temporadas.first;
-      final episodios = selecionada == null
+      final episodios =
+          selecionada == null ||
+              !provider.canAccess(selecionada.requiredPlanLevel)
           ? <StreamingEpisode>[]
           : await _service.fetchEpisodes(selecionada.id);
 
@@ -204,6 +206,18 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
     if (_temporadaSelecionada?.id == temporada.id || _carregandoEpisodios) {
       return;
     }
+    final bloqueada = !context.read<StreamingProvider>().canAccess(
+      temporada.requiredPlanLevel,
+    );
+    if (bloqueada) {
+      setState(() {
+        _temporadaSelecionada = temporada;
+        _episodios = [];
+        _carregandoEpisodios = false;
+      });
+      return;
+    }
+
     setState(() {
       _temporadaSelecionada = temporada;
       _episodios = [];
@@ -356,6 +370,9 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
     final serie = _serie!;
     final favorita = provider.isFavorite(serie.id);
     final trailerId = serie.trailerIdValido;
+    final temporadaBloqueada =
+        _temporadaSelecionada != null &&
+        !provider.canAccess(_temporadaSelecionada!.requiredPlanLevel);
 
     return Scaffold(
       backgroundColor: ThemeColors.background(context),
@@ -435,34 +452,45 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                 _seletorTemporadas(context),
                 if (_temporadaSelecionada != null)
                   _cartaoTemporada(context, _temporadaSelecionada!),
-                StreamingSectionHeader(
-                  title: 'Episódios',
-                  actionLabel: _temporadaSelecionada?.nomeExibicao,
-                ),
-                if (_carregandoEpisodios)
-                  const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Center(child: CircularProgressIndicator()),
+                if (temporadaBloqueada)
+                  _paywall(
+                    context,
+                    titulo: 'Temporada exclusiva O Pest+',
+                    mensagem:
+                        '${_temporadaSelecionada!.nomeExibicao} faz parte do '
+                        'conteúdo exclusivo para assinantes ou códigos de '
+                        'acesso do O Pest+.',
                   )
-                else if (_episodios.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(AppSpacing.md),
-                    child: StreamingEmptyState(
-                      title: 'Nenhum episódio disponível',
-                      message:
-                          'Os episódios desta temporada aparecerão aqui quando forem publicados.',
-                      icon: Icons.playlist_remove_rounded,
-                    ),
-                  )
-                else
-                  ..._episodios.map(
-                    (episodio) => _EpisodioTile(
-                      episodio: episodio,
-                      temporada: _temporadaSelecionada!,
-                      progresso: _progressos[episodio.id],
-                      onTap: () => _abrirEpisodio(episodio),
-                    ),
+                else ...[
+                  StreamingSectionHeader(
+                    title: 'Episódios',
+                    actionLabel: _temporadaSelecionada?.nomeExibicao,
                   ),
+                  if (_carregandoEpisodios)
+                    const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_episodios.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(AppSpacing.md),
+                      child: StreamingEmptyState(
+                        title: 'Nenhum episódio disponível',
+                        message:
+                            'Os episódios desta temporada aparecerão aqui quando forem publicados.',
+                        icon: Icons.playlist_remove_rounded,
+                      ),
+                    )
+                  else
+                    ..._episodios.map(
+                      (episodio) => _EpisodioTile(
+                        episodio: episodio,
+                        temporada: _temporadaSelecionada!,
+                        progresso: _progressos[episodio.id],
+                        onTap: () => _abrirEpisodio(episodio),
+                      ),
+                    ),
+                ],
               ],
               const SizedBox(height: 120),
             ]),
@@ -660,8 +688,13 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
     );
   }
 
-  Widget _paywall(BuildContext context) {
+  Widget _paywall(BuildContext context, {String? titulo, String? mensagem}) {
     final planos = context.watch<StreamingProvider>().plans;
+    final tituloFinal = titulo ?? 'Conteúdo exclusivo O Pest+';
+    final mensagemFinal =
+        mensagem ??
+        'Esta produção faz parte da versão alternativa do catálogo. '
+            'Assine para liberar temporadas, episódios e novos lançamentos.';
     return Container(
       margin: const EdgeInsets.fromLTRB(AppSpacing.md, 16, AppSpacing.md, 0),
       padding: const EdgeInsets.all(16),
@@ -692,7 +725,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Conteúdo exclusivo O Pest+',
+                  tituloFinal,
                   style: Theme.of(
                     context,
                   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
@@ -702,8 +735,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Esta produção faz parte da versão alternativa do catálogo. '
-            'Assine para liberar temporadas, episódios e novos lançamentos.',
+            mensagemFinal,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: ThemeColors.secondaryText(context),
               height: 1.45,
@@ -819,6 +851,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
   }
 
   Widget _seletorTemporadas(BuildContext context) {
+    final provider = context.watch<StreamingProvider>();
     return SizedBox(
       height: 44,
       child: ListView.separated(
@@ -829,6 +862,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
         itemBuilder: (context, index) {
           final temporada = _temporadas[index];
           final selecionada = temporada.id == _temporadaSelecionada?.id;
+          final bloqueada = !provider.canAccess(temporada.requiredPlanLevel);
           return GestureDetector(
             onTap: () => _selecionarTemporada(temporada),
             child: AnimatedContainer(
@@ -845,14 +879,29 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                       : ThemeColors.outline(context),
                 ),
               ),
-              child: Text(
-                temporada.nomeExibicao,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: selecionada
-                      ? Colors.white
-                      : ThemeColors.primaryText(context),
-                  fontWeight: FontWeight.w700,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (bloqueada) ...[
+                    Icon(
+                      Icons.lock_rounded,
+                      size: 12,
+                      color: selecionada
+                          ? Colors.white
+                          : ThemeColors.primary(context),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    temporada.nomeExibicao,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: selecionada
+                          ? Colors.white
+                          : ThemeColors.primaryText(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
           );

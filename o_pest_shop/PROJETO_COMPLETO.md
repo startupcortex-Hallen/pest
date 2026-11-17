@@ -260,10 +260,12 @@ Tabela `streaming_plans`:
 - ordem.
 
 Plano principal ativo:
-- **O Pest+** — R$ 14,99 por mês, nível 1, mensal, 1 tela, HD.
-- Benefícios: 12 temporadas completas, 10 episódios por temporada, novos episódios antes e acesso no celular.
+- **O Pest+** - R$ 14,99 por mês, nível 1, mensal, 1 tela, HD.
+- As 12 temporadas principais continuam gratuitas (conteúdo do YouTube).
+- O plano libera as temporadas exclusivas de bastidores/conteúdo especial.
+- Benefícios: bastidores de cada temporada principal, extras, novos conteúdos antes e acesso no celular.
 
-O administrador pode criar outros planos e níveis pelo painel.
+O administrador pode criar outros planos, níveis e temporadas exclusivas pelo painel.
 
 ### 6.2.1 Códigos de acesso
 
@@ -401,9 +403,19 @@ Para marcar conteúdo exclusivo:
    - atualização da policy de episódios;
    - view de catálogo atualizada;
    - plano O Pest+ de R$ 14,99/mês;
-   - códigos de acesso temporário;
-   - seed de 12 temporadas x 10 episódios;
-   - realtime de séries/temporadas/episódios.
+   - códigos de acesso temporário.
+
+3. `supabase/migrations/20261114120000_streaming_bastidores.sql`
+   - acesso por temporada;
+   - as 12 temporadas principais ficam gratuitas;
+   - 120 episódios principais;
+   - série separada de bastidores;
+   - 1 temporada de bastidores grátis (5 episódios);
+   - 12 temporadas de bastidores exclusivas (5 episódios cada);
+   - RLS de temporada/episódio atualizada.
+
+4. `supabase/migrations/20261115120000_streaming_plan_bastidores.sql`
+   - atualiza os benefícios do plano O Pest+ para o modelo de bastidores exclusivos.
 
 Status: **aplicadas no projeto remoto**.
 
@@ -424,16 +436,28 @@ Ou colar o SQL no SQL Editor do Supabase.
 
 ## 9. Seed inicial de conteúdo
 
-Série criada:
+Séries criadas:
 
-- **De Dentro da Favela**
-- Canal: O Pest
-- Status: publicado
-- Destaque: sim
-- Categoria: Websérie
-- Acesso: exclusivo O Pest+ (nível 1)
-- **12 temporadas**
-- **10 episódios por temporada = 120 episódios**
+1. **De Dentro da Favela** — série principal
+   - Canal: O Pest
+   - Status: publicado
+   - Destaque: sim
+   - Categoria: Websérie
+   - Acesso: **gratuito**
+   - **12 temporadas**
+   - **10 episódios por temporada = 120 episódios**
+   - Watch no YouTube normalmente, também dentro do app.
+
+2. **Bastidores - De Dentro da Favela** — série separada
+   - Status: publicado
+   - Destaque: sim
+   - Categoria: Bastidores
+   - Acesso: gratuito na série, com temporadas exclusivas
+   - **13 temporadas**
+   - **1 temporada grátis** (5 episódios)
+   - **12 temporadas exclusivas O Pest+** (5 episódios cada, uma para cada temporada principal)
+   - Total: **65 episódios**
+   - As temporadas exclusivas liberam com assinatura ou código de acesso.
 
 Os links dos episódios são **placeholders públicos do YouTube** para teste.
 O administrador deve substituí-los pelos vídeos oficiais.
@@ -535,6 +559,12 @@ Abas relevantes:
 ### Cadastrar temporada
 1. Temporadas → selecionar série → Nova temporada.
 2. Informar número, título, descrição, capa, data de lançamento, status e ordem.
+3. Definir **Acesso à temporada**:
+   - `0` = grátis;
+   - `1` = exclusivo O Pest+;
+   - `2`/`3` = níveis superiores.
+4. A temporada pode ser grátis mesmo em uma série com temporadas pagas.
+5. Episódios herdam o maior nível entre série, temporada e episódio.
 
 ### Cadastrar episódio
 1. Episódios → selecionar série/temporada → Novo episódio.
@@ -616,10 +646,15 @@ Resultado atual: **sucesso**.
 
 ### Testes remotos
 - Migrations `20261112120000` e `20261113120000` aplicadas no Supabase.
-- 12 temporadas e 120 episódios confirmados no banco.
+- Série principal: 12 temporadas e 120 episódios gratuitos confirmados.
+- Bastidores: 13 temporadas e 65 episódios; 1 temporada grátis e 12 exclusivas.
 - Plano O Pest+ ativo a R$ 14,99/mês.
 - Código de acesso de teste criado e resgatado com sucesso no app.
-- Paywall, desbloqueio por código, 12 temporadas, episódios e player testados no emulador Android.
+- Validação RLS:
+  - anônimo vê 5 episódios da temporada grátis de bastidores;
+  - anônimo vê 0 episódios de uma temporada exclusiva;
+  - usuário com código ativo vê os 5 episódios da temporada exclusiva.
+- Paywall por temporada, desbloqueio por código, temporadas grátis/pagas e player testados no emulador Android.
 - Leitura pública confirmada; escrita anônima bloqueada.
 - Realtime de episódios incluído; atualização de link reflete no detalhe/player.
 - Combinações de links do YouTube variam: alguns vídeos retornam restrição de incorporação (tratada pelo app).
