@@ -24,6 +24,7 @@ class StreamingProvider extends ChangeNotifier {
         _continueWatching = const [];
         _favorites = <String>{};
         _subscription = null;
+        _isAdmin = false;
         _loadedUserId = id;
         _lastLoaded = null;
         notifyListeners();
@@ -47,6 +48,7 @@ class StreamingProvider extends ChangeNotifier {
   StreamingSeriesStats _heroStats = const StreamingSeriesStats();
   int? _heroSeasonNumber;
   bool _loading = false;
+  bool _isAdmin = false;
   String? _error;
   DateTime? _lastLoaded;
   String? _loadedUserId;
@@ -75,6 +77,7 @@ class StreamingProvider extends ChangeNotifier {
 
   bool canAccess(int requiredPlanLevel) {
     if (requiredPlanLevel <= 0) return true;
+    if (_isAdmin) return true;
     final assinatura = _subscription;
     return assinatura != null &&
         assinatura.ativa &&
@@ -134,6 +137,7 @@ class StreamingProvider extends ChangeNotifier {
       var continueAssistindo = <ContinueWatchingItem>[];
       var favoritos = <String>{};
       StreamingSubscription? assinatura;
+      var isAdmin = false;
       if (usuarioAtual != null) {
         continueAssistindo = await _service.fetchContinueWatching(usuarioAtual);
         favoritos = await _service.fetchFavoriteSeriesIds(usuarioAtual);
@@ -141,6 +145,12 @@ class StreamingProvider extends ChangeNotifier {
           assinatura = await _subscriptionService.fetchMinhaAssinatura();
         } catch (e) {
           debugPrint('Erro ao carregar assinatura: $e');
+        }
+        try {
+          final perfil = await _authService.getProfile(usuarioAtual);
+          isAdmin = perfil?.funcao == 'admin';
+        } catch (e) {
+          debugPrint('Erro ao carregar função do perfil: $e');
         }
       }
 
@@ -168,6 +178,7 @@ class StreamingProvider extends ChangeNotifier {
       _favorites = favoritos;
       _plans = planos;
       _subscription = assinatura;
+      _isAdmin = isAdmin;
 
       var destaques = series.where((item) => item.isFeatured).toList();
       if (destaques.isEmpty) destaques = series.take(12).toList();

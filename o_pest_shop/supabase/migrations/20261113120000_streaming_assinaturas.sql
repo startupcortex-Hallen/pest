@@ -148,7 +148,10 @@ grant execute on function public.streaming_contar_episodios(uuid) to anon, authe
 
 -- A view é recriada para expor required_plan_level e manter a contagem de
 -- episódios mesmo para quem ainda não é assinante.
-create or replace view public.streaming_series_catalogo
+-- O DROP é necessário porque a nova coluna entra antes das colunas de contagem.
+drop view if exists public.streaming_series_catalogo;
+
+create view public.streaming_series_catalogo
 with (security_invoker = true)
 as
 select
