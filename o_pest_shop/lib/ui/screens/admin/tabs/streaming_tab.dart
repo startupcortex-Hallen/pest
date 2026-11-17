@@ -7,6 +7,7 @@ import '../../../../models/streaming_models.dart';
 import '../../../../services/streaming/streaming_admin_service.dart';
 import '../../streaming/streaming_widgets.dart';
 import '../streaming_episode_form_screen.dart';
+import '../streaming_episode_import_screen.dart';
 import '../streaming_season_form_screen.dart';
 import '../streaming_series_form_screen.dart';
 import '../streaming_admin_widgets.dart';
@@ -230,6 +231,29 @@ class _StreamingTabState extends State<StreamingTab> {
       ),
     );
     if (salvou == true) _carregar();
+  }
+
+  Future<void> _abrirImportacaoEpisodios() async {
+    if (_series.isEmpty) {
+      _snack('Cadastre uma série e uma temporada antes de importar links.');
+      return;
+    }
+    if (_temporadas.isEmpty) {
+      _snack('Cadastre uma temporada antes de importar links.');
+      return;
+    }
+    final importou = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StreamingEpisodeImportScreen(
+          series: _series,
+          temporadas: _temporadas,
+          seriesInicialId: _filtroSerieEpisodio,
+          seasonInicialId: _filtroTemporadaEpisodio,
+        ),
+      ),
+    );
+    if (importou == true) _carregar();
   }
 
   Future<void> _abrirFormularioEpisodio([
@@ -957,6 +981,8 @@ class _StreamingTabState extends State<StreamingTab> {
           titulo: '${lista.length} episódio(s)',
           botao: 'Novo episódio',
           onNovo: () => _abrirFormularioEpisodio(),
+          botaoSecundario: 'Importar links',
+          onSecundario: _abrirImportacaoEpisodios,
         ),
         Expanded(
           child: _series.isEmpty || _temporadas.isEmpty
@@ -1877,6 +1903,8 @@ class _StreamingTabState extends State<StreamingTab> {
     required String titulo,
     required String botao,
     required VoidCallback onNovo,
+    String? botaoSecundario,
+    VoidCallback? onSecundario,
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, 12, AppSpacing.md, 8),
@@ -1888,6 +1916,23 @@ class _StreamingTabState extends State<StreamingTab> {
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
+          if (botaoSecundario != null && onSecundario != null) ...[
+            OutlinedButton.icon(
+              onPressed: onSecundario,
+              icon: const Icon(Icons.link_rounded, size: 16),
+              label: Text(
+                botaoSecundario,
+                style: const TextStyle(fontSize: 11),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           ElevatedButton.icon(
             onPressed: onNovo,
             icon: const Icon(Icons.add_rounded, size: 16),

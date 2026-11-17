@@ -52,6 +52,11 @@ class StreamingAdminService {
     return _list(resposta);
   }
 
+  Future<void> importarEpisodios(List<Map<String, dynamic>> dados) async {
+    if (dados.isEmpty) return;
+    await _client.from('streaming_episodes').insert(dados);
+  }
+
   Future<Map<String, dynamic>?> fetchHomeConfig() async {
     final resposta = await _client
         .from('streaming_home_config')

@@ -506,6 +506,17 @@ Abas relevantes:
 5. Salvar ou publicar.
 6. Se a data for futura, fica agendado e é liberado automaticamente ao chegar a data.
 
+### Importar vários episódios por links
+1. Episódios → selecionar série/temporada → **Importar links**.
+2. Colar um link do YouTube por linha.
+3. Opcionalmente, usar `URL | Título do episódio`.
+4. Tocar em **Validar links**.
+5. O sistema mostra prévia, numeração automática, links inválidos e duplicados.
+6. Tocar em **Importar N episódios como rascunho**.
+7. Revisar, definir nível de acesso e publicar cada episódio.
+
+A importação em lote foi criada especialmente para receber a lista completa de links das temporadas quando ela estiver disponível.
+
 ### Imagens
 - Upload com validação real de JPG/PNG/WebP.
 - Limite de 10 MB.
@@ -574,7 +585,8 @@ Resultado atual: **sucesso**.
 6. Marcar a série/versão alternativa com nível de acesso > 0.
 7. Testar o ciclo completo em sandbox do Mercado Pago.
 8. Substituir os vídeos de teste por vídeos que permitam incorporação.
-9. Opcional: perfis por conta, downloads offline, notificações, recomendação e Top 10.
+9. Quando a lista oficial de links chegar, usar **Séries → Episódios → Importar links** por temporada.
+10. Opcional: perfis por conta, downloads offline, notificações, recomendação e Top 10.
 10. Opcional: limpeza automática de imagens no Storage ao excluir registros.
 
 ---
