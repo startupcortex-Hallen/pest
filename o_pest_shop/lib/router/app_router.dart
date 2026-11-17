@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/auth_notifier.dart';
@@ -13,17 +12,18 @@ import '../ui/screens/cupons/cupons_screen.dart';
 import '../ui/screens/cartoes/cartoes_screen.dart';
 import '../ui/screens/profile/edit_personal_data_screen.dart';
 import '../ui/screens/profile/enderecos_screen.dart';
-import '../ui/screens/feed/feed_screen.dart';
 import '../ui/screens/feed/post_detail_screen.dart';
 import '../ui/screens/feed/aviso_detail_screen.dart';
 import '../ui/screens/feed/novidade_detail_screen.dart';
 import '../ui/screens/feed/evento_detail_screen.dart';
 import '../ui/screens/feed/unidade_screen.dart';
+import '../ui/screens/streaming/series_detail_screen.dart';
+import '../ui/screens/streaming/episode_player_screen.dart';
+import '../ui/screens/streaming/streaming_library_screen.dart';
+import '../ui/screens/streaming/streaming_subscription_screen.dart';
 import '../ui/screens/chat/chat_screen.dart';
 import '../ui/screens/chat/central_atendimento_screen.dart';
 import '../ui/screens/favorites/favorites_screen.dart';
-import '../ui/screens/home/home_screen.dart';
-import '../ui/screens/pedidos/pedidos_screen.dart';
 import '../ui/screens/profile/profile_screen.dart';
 import '../ui/screens/cart/cart_screen.dart';
 import '../ui/screens/pedidos/pedidos_screen.dart';
@@ -42,12 +42,7 @@ class AppRouter {
     if (location.isEmpty || location == '/' || location.startsWith('/?')) {
       return true;
     }
-    const exatas = {
-      '/login',
-      '/register',
-      '/redefinir-senha',
-      '/busca',
-    };
+    const exatas = {'/login', '/register', '/redefinir-senha', '/busca'};
     if (exatas.contains(location)) return true;
     const prefixos = [
       '/busca?',
@@ -58,6 +53,8 @@ class AppRouter {
       '/aviso/',
       '/novidade/',
       '/evento/',
+      '/serie/',
+      '/assinatura',
     ];
     return prefixos.any(location.startsWith);
   }
@@ -98,10 +95,7 @@ class AppRouter {
         path: '/splash',
         builder: (context, state) => const SplashScreen(),
       ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
-      ),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
@@ -110,10 +104,7 @@ class AppRouter {
         path: '/redefinir-senha',
         builder: (context, state) => const RedefinirSenhaScreen(),
       ),
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const MainShell(),
-      ),
+      GoRoute(path: '/', builder: (context, state) => const MainShell()),
       GoRoute(
         path: '/busca',
         builder: (context, state) {
@@ -123,10 +114,7 @@ class AppRouter {
       ),
       GoRoute(
         path: '/categoria/:id',
-        builder: (context, state) {
-          final id = int.tryParse(state.pathParameters['id'] ?? '');
-          return MainShell();
-        },
+        builder: (context, state) => const MainShell(),
       ),
       GoRoute(
         path: '/produto/:id',
@@ -140,10 +128,7 @@ class AppRouter {
         path: '/favoritos',
         builder: (context, state) => const FavoritesScreen(),
       ),
-      GoRoute(
-        path: '/perfil',
-        builder: (context, state) => ProfileScreen(),
-      ),
+      GoRoute(path: '/perfil', builder: (context, state) => ProfileScreen()),
       GoRoute(
         path: '/carrinho',
         builder: (context, state) => const CartScreen(),
@@ -200,19 +185,59 @@ class AppRouter {
         },
       ),
       GoRoute(
+        path: '/serie/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          if (id.isEmpty) return const MainShell();
+          return SeriesDetailScreen(seriesId: id);
+        },
+      ),
+      GoRoute(
+        path: '/serie/:id/episodio/:episodeId',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          final episodioId = state.pathParameters['episodeId'] ?? '';
+          if (id.isEmpty || episodioId.isEmpty) return const MainShell();
+          return EpisodePlayerScreen(seriesId: id, episodeId: episodioId);
+        },
+      ),
+      GoRoute(
+        path: '/minha-lista',
+        builder: (context, state) =>
+            const StreamingLibraryScreen(initialTab: 0),
+      ),
+      GoRoute(
+        path: '/historico',
+        builder: (context, state) =>
+            const StreamingLibraryScreen(initialTab: 1),
+      ),
+      GoRoute(
+        path: '/assinatura',
+        builder: (context, state) => const StreamingSubscriptionScreen(),
+      ),
+      GoRoute(
         path: '/pedidos',
         builder: (context, state) => const PedidosScreen(),
       ),
-      GoRoute(path: '/chat/:id/:nome', builder: (_, s) => ChatScreen(
-        unidadeId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
-        unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
-      )),
-      GoRoute(path: '/chat-conversa/:id/:nome', builder: (_, s) => ChatScreen(
-        conversaId: int.tryParse(s.pathParameters['id'] ?? ''),
-        unidadeId: 0,
-        unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
-      )),
-      GoRoute(path: '/central-atendimento', builder: (_, s) => const CentralAtendimentoScreen()),
+      GoRoute(
+        path: '/chat/:id/:nome',
+        builder: (_, s) => ChatScreen(
+          unidadeId: int.tryParse(s.pathParameters['id'] ?? '') ?? 0,
+          unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
+        ),
+      ),
+      GoRoute(
+        path: '/chat-conversa/:id/:nome',
+        builder: (_, s) => ChatScreen(
+          conversaId: int.tryParse(s.pathParameters['id'] ?? ''),
+          unidadeId: 0,
+          unidadeNome: Uri.decodeComponent(s.pathParameters['nome'] ?? ''),
+        ),
+      ),
+      GoRoute(
+        path: '/central-atendimento',
+        builder: (_, s) => const CentralAtendimentoScreen(),
+      ),
       GoRoute(
         path: '/area-entregador',
         builder: (context, state) {
@@ -229,7 +254,9 @@ class AppRouter {
         builder: (context, state) {
           final auth = context.read<AuthProvider>();
           final funcao = auth.user?.funcao;
-          if (funcao != 'admin' && funcao != 'atendente' && funcao != 'gestor') {
+          if (funcao != 'admin' &&
+              funcao != 'atendente' &&
+              funcao != 'gestor') {
             return const MainShell();
           }
           return const PedidosLojaScreen();
@@ -240,7 +267,9 @@ class AppRouter {
         builder: (context, state) {
           final auth = context.read<AuthProvider>();
           final funcao = auth.user?.funcao;
-          if (funcao != 'admin' && funcao != 'gestor' && funcao != 'atendente') {
+          if (funcao != 'admin' &&
+              funcao != 'gestor' &&
+              funcao != 'atendente') {
             return const MainShell();
           }
           return const AdminScreen(modoParceiro: true);
@@ -259,7 +288,9 @@ class AppRouter {
         builder: (context, state) {
           final auth = context.read<AuthProvider>();
           final funcao = auth.user?.funcao;
-          if (funcao != 'admin' && funcao != 'atendente' && funcao != 'gestor') {
+          if (funcao != 'admin' &&
+              funcao != 'atendente' &&
+              funcao != 'gestor') {
             return const MainShell();
           }
           final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;

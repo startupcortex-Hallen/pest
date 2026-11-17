@@ -24,6 +24,7 @@ import 'tabs/usuarios_tab.dart';
 import 'tabs/dashboard_tab.dart';
 import 'tabs/integracoes_tab.dart';
 import 'tabs/banners_tab.dart';
+import 'tabs/streaming_tab.dart';
 import '../../widgets/animated_card_entry.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -78,7 +79,7 @@ class _AdminScreenState extends State<AdminScreen>
     } else {
       _unidadeFiltroParceiro = null;
     }
-    _tabCtrl = TabController(length: 21, vsync: this, initialIndex: 18);
+    _tabCtrl = TabController(length: 22, vsync: this, initialIndex: 18);
     _tabCtrl.addListener(() {
       if (!_tabCtrl.indexIsChanging) _loadTabData(_tabCtrl.index);
       if (_tabCtrl.index == 9 && _novosPedidos > 0 && mounted) {
@@ -636,6 +637,12 @@ class _AdminScreenState extends State<AdminScreen>
                           20,
                         ),
                         const SizedBox(width: AppSpacing.lg),
+                        _buildTabItem(
+                          'Séries',
+                          Icons.movie_rounded,
+                          21,
+                        ),
+                        const SizedBox(width: AppSpacing.lg),
                       ],
                       if (_tabPermitida(6)) ...[
                         _buildTabItem('Cupons', Icons.discount_rounded, 6),
@@ -797,6 +804,7 @@ class _AdminScreenState extends State<AdminScreen>
       );
     }
     if (_tabCtrl.index == 20) return const BannersTab();
+    if (_tabCtrl.index == 21) return const StreamingTab();
     return const SizedBox.shrink();
   }
 

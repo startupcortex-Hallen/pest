@@ -4,11 +4,11 @@ import 'package:provider/provider.dart';
 import '../../providers/app_config_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/cart_provider.dart';
-import '../../providers/feed_provider.dart';
 import '../../providers/home_provider.dart';
+import '../../providers/streaming_provider.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/cart/cart_screen.dart';
-import '../screens/feed/feed_screen.dart';
+import '../screens/streaming/streaming_home_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/unidades/unidades_screen.dart';
 import '../widgets/login_required.dart';
@@ -29,7 +29,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   List<Widget> _screens(bool isLoggedIn) => [
         const HomeScreen(),
-        const FeedScreen(),
+        const StreamingHomeScreen(),
         const UnidadesScreen(),
         if (isLoggedIn)
           const CartScreen()
@@ -114,7 +114,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
     if (index == 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<FeedProvider>().loadIfStale();
+        context.read<StreamingProvider>().loadIfStale();
       });
     }
   }
@@ -126,7 +126,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final screens = _screens(isLoggedIn);
     final items = [
       _NavItem(Icons.store_rounded, Icons.store_rounded, 'Início'),
-      _NavItem(Icons.rss_feed_rounded, Icons.rss_feed_rounded, 'Feed'),
+      _NavItem(Icons.play_circle_outline_rounded, Icons.play_circle_rounded,
+          'Séries'),
       _NavItem(Icons.store_mall_directory_rounded, Icons.store_mall_directory_rounded, 'Lojas'),
       _NavItem(Icons.shopping_cart_outlined, Icons.shopping_cart_rounded, 'Carrinho'),
       _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Perfil'),

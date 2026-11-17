@@ -77,6 +77,33 @@ class CustomDrawer extends StatelessWidget {
                       },
                     ),
                     _DrawerItem(
+                      icon: Icons.workspace_premium_rounded,
+                      label: 'O Pest+ / Assinatura',
+                      visible: true,
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/assinatura');
+                      },
+                    ),
+                    _DrawerItem(
+                      icon: Icons.video_library_rounded,
+                      label: 'Minha lista de séries',
+                      visible: logado,
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/minha-lista');
+                      },
+                    ),
+                    _DrawerItem(
+                      icon: Icons.history_rounded,
+                      label: 'Histórico de séries',
+                      visible: logado,
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/historico');
+                      },
+                    ),
+                    _DrawerItem(
                       icon: Icons.location_on_rounded,
                       label: 'Meus Endereços',
                       visible: logado,
@@ -142,12 +169,19 @@ class CustomDrawer extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
-          context.w(16), context.h(48), context.w(16), context.h(24)),
+        context.w(16),
+        context.h(48),
+        context.w(16),
+        context.h(24),
+      ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [ThemeColors.primary(context), ThemeColors.primary(context).withValues(alpha: 0.7)],
+          colors: [
+            ThemeColors.primary(context),
+            ThemeColors.primary(context).withValues(alpha: 0.7),
+          ],
         ),
         borderRadius: BorderRadius.only(
           bottomLeft: Radius.circular(context.w(24)),
@@ -163,9 +197,10 @@ class CustomDrawer extends StatelessWidget {
             child: Text(
               nome.isNotEmpty ? nome[0].toUpperCase() : 'U',
               style: TextStyle(
-                  color: Colors.white,
-                  fontSize: context.sp(26),
-                  fontWeight: FontWeight.bold),
+                color: Colors.white,
+                fontSize: context.sp(26),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           SizedBox(height: context.h(12)),
@@ -180,10 +215,7 @@ class CustomDrawer extends StatelessWidget {
           SizedBox(height: context.h(4)),
           Text(
             email,
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: context.sp(12),
-            ),
+            style: TextStyle(color: Colors.white70, fontSize: context.sp(12)),
           ),
         ],
       ),
@@ -210,8 +242,11 @@ class _DrawerItem extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!visible) return const SizedBox.shrink();
     return ListTile(
-      leading: Icon(icon, color: color ?? ThemeColors.primary(context),
-          size: context.sp(22)),
+      leading: Icon(
+        icon,
+        color: color ?? ThemeColors.primary(context),
+        size: context.sp(22),
+      ),
       title: Text(
         label,
         style: TextStyle(

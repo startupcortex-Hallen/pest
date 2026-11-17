@@ -9,10 +9,13 @@ import '../../../core/helpers/scale_helper.dart';
 import '../../../core/helpers/theme_colors.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../models/categoria.dart';
 import '../../../models/produto.dart';
 import '../../../providers/home_provider.dart';
 import '../../widgets/animated_card_entry.dart';
+import '../../widgets/app_states.dart';
 import '../../widgets/app_top_bar.dart';
+import '../../widgets/banner_carousel.dart';
 import '../../widgets/custom_drawer.dart';
 import '../../widgets/featured_card.dart';
 import '../product/product_detail_screen.dart';
@@ -91,6 +94,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _scrollToTopSmoothly() {
+    if (!_productScrollController.hasClients) return;
+    if (_productScrollController.offset <= 0) return;
+    _productScrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _selecionarCategoria(int? categoriaId, int index) {
+    setState(() {
+      _selectedCategoriaId = categoriaId;
+      _loadedCategoriaId = null;
+      _lastRefreshCount = -1;
+    });
+    _scrollToCategory(index);
+    _scrollToTopSmoothly();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -102,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           AppTopBar.withSearch(
             onMenuTap: () => _scaffoldKey.currentState?.openDrawer(),
             onSearchTap: () => context.push('/busca'),
-            bottomWidget: _buildCategories(context),
           ),
           Expanded(
             child: Consumer<HomeProvider>(
@@ -115,7 +137,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _lastRefreshCount = home.refreshCount;
                       // Carrega após o build para evitar "setState during build"
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) home.loadProdutosPorMarca(_selectedCategoriaId!);
+                        if (mounted) {
+                          home.loadProdutosPorMarca(_selectedCategoriaId!);
+                        }
                       });
                     }
                   }
@@ -123,22 +147,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _loadedCategoriaId = null;
                 }
 
-                final showLoading = home.loading &&
-                    (_selectedCategoriaId == null
-                        ? home.produtos.isEmpty
-                        : home.produtosPorMarca.isEmpty);
-
-                if (showLoading) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
-                if (home.error != null &&
-                    home.produtos.isEmpty &&
-                    home.produtosPorMarca.isEmpty) {
-                  return _buildErrorState(home);
-                }
-                return _buildLazyFeed(home);
+                return _buildScrollableBody(context, home);
               },
             ),
           ),
@@ -149,58 +158,163 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildErrorState(HomeProvider home) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.cloud_off, color: AppColors.hint, size: 48),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            home.error!,
-            textAlign: TextAlign.center,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: AppColors.secondaryText),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          ElevatedButton(
-            onPressed: home.loadHomeData,
-            child: const Text('Tentar novamente'),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.xl,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, color: AppColors.hint, size: 48),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              home.error!,
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: AppColors.secondaryText),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            ElevatedButton(
+              onPressed: home.loadHomeData,
+              child: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ─── FEED LAZY (ListView.builder por seção) ─────────
+  // ─── CORPO COM CUSTOMSCROLLVIEW + SLIVERS ───────────
 
-  Widget _buildLazyFeed(HomeProvider home) {
-    final secoes = _montarSecoes(home);
+  Widget _buildScrollableBody(BuildContext context, HomeProvider home) {
+    final showFeedLoading = home.loading &&
+        (_selectedCategoriaId == null
+            ? home.produtos.isEmpty
+            : home.produtosPorMarca.isEmpty);
+    final showBannerSkeleton =
+        home.loading && home.banners.isEmpty && home.produtos.isEmpty;
+    final showFeedError = home.error != null &&
+        home.produtos.isEmpty &&
+        home.produtosPorMarca.isEmpty;
+
+    final cardHeight = context.h(104).clamp(88.0, 120.0);
+    final verticalPad = context.w(AppSpacing.sm).clamp(6.0, 12.0);
+    final headerExtent = cardHeight + (verticalPad * 2);
+    final bottomSafePadding =
+        context.h(96).clamp(88.0, 116.0) + MediaQuery.of(context).padding.bottom;
+
     return RefreshIndicator(
       onRefresh: () async {
         await context.read<HomeProvider>().refresh();
       },
       color: ThemeColors.primary(context),
-      child: ListView.builder(
+      child: CustomScrollView(
         controller: _productScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(0, context.h(22).clamp(16.0, 32.0), 0, context.w(AppSpacing.lg)),
-        itemCount: secoes.length,
-        itemBuilder: (context, index) {
-          final s = secoes[index];
-          if (s.builder != null) return s.builder!(context);
-          return Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-            child: _buildSectionWithScroll(
-              context,
-              titulo: s.titulo!,
-              subtitle: s.subtitulo,
-              produtos: s.produtos!,
+        slivers: [
+          // 1. Carrossel de banners (ou skeleton / respiro quando vazio)
+          if (showBannerSkeleton)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: AppSkeleton(
+                      height: context.h(184).clamp(156.0, 220.0),
+                      radius: 24,
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else if (home.banners.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 20, bottom: 24),
+                child: BannerCarousel(
+                  key: ValueKey('banners_${home.refreshCount}'),
+                  banners: home.banners,
+                  onTap: _abrirBanner,
+                ),
+              ),
+            )
+          else
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 12),
             ),
-          );
-        },
+
+          // 2. Menu de categorias fixo (sticky) ao rolar
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _CategoriesStickyHeaderDelegate(
+              extent: headerExtent,
+              backgroundColor: ThemeColors.background(context),
+              child: _buildCategoriesCard(
+                context,
+                categorias: home.categorias,
+                cardHeight: cardHeight,
+                verticalPadding: verticalPad,
+              ),
+            ),
+          ),
+
+          // 3. Conteúdo do feed (loading, erro ou seções de produtos)
+          if (showFeedLoading)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            )
+          else if (showFeedError)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _buildErrorState(home),
+            )
+          else
+            ..._buildFeedSlivers(context, home, bottomSafePadding),
+        ],
       ),
     );
+  }
+
+  List<Widget> _buildFeedSlivers(
+    BuildContext context,
+    HomeProvider home,
+    double bottomSafePadding,
+  ) {
+    final secoes = _montarSecoes(home);
+    return [
+      SliverPadding(
+        padding: EdgeInsets.only(
+          top: context.h(18).clamp(14.0, 26.0),
+          bottom: bottomSafePadding,
+        ),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final s = secoes[index];
+              if (s.builder != null) return s.builder!(context);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                child: _buildSectionWithScroll(
+                  context,
+                  titulo: s.titulo!,
+                  subtitle: s.subtitulo,
+                  produtos: s.produtos!,
+                ),
+              );
+            },
+            childCount: secoes.length,
+          ),
+        ),
+      ),
+    ];
   }
 
   /// Monta as seções do feed sob demanda (só as visíveis são construídas).
@@ -208,28 +322,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_selectedCategoriaId != null) {
       final porMarca = home.produtosPorMarca;
       if (porMarca.isEmpty) {
-        return [_Secao.custom((context) => _buildEmptyMessage(context, 'Nenhum produto encontrado'))];
+        return [
+          _Secao.custom(
+            (context) => _buildEmptyMessage(context, 'Nenhum produto encontrado'),
+          ),
+        ];
       }
-      return porMarca.entries.map((entry) => _Secao.produtos(
-            titulo: entry.key,
-            subtitulo: '${entry.value.length} ${entry.value.length == 1 ? 'item' : 'itens'}',
-            produtos: entry.value,
-          )).toList();
+      return porMarca.entries
+          .map(
+            (entry) => _Secao.produtos(
+              titulo: entry.key,
+              subtitulo:
+                  '${entry.value.length} ${entry.value.length == 1 ? 'item' : 'itens'}',
+              produtos: entry.value,
+            ),
+          )
+          .toList();
     }
 
     final secoes = <_Secao>[];
-    final banners = home.banners;
-    if (banners.isNotEmpty) {
-      secoes.add(_Secao.custom((context) => Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-            child: _buildBannersSection(context, banners),
-          )));
-    }
     if (home.promocoes.isNotEmpty) {
-      secoes.add(_Secao.custom((context) => Padding(
+      secoes.add(
+        _Secao.custom(
+          (context) => Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.lg),
             child: _buildFlashOffersSection(home),
-          )));
+          ),
+        ),
+      );
     }
 
     // Deduplica produtos entre as seções (Ofertas + blocos por categoria):
@@ -248,22 +368,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..sort((a, b) => b.value.length.compareTo(a.value.length));
     for (final entry in sortedEntries) {
       final catNome = entry.value.first.categoriaNome ?? 'Categoria';
-      secoes.add(_Secao.produtos(
-        titulo: catNome,
-        subtitulo: '${entry.value.length} ${entry.value.length == 1 ? 'item' : 'itens'}',
-        produtos: entry.value,
-      ));
+      secoes.add(
+        _Secao.produtos(
+          titulo: catNome,
+          subtitulo:
+              '${entry.value.length} ${entry.value.length == 1 ? 'item' : 'itens'}',
+          produtos: entry.value,
+        ),
+      );
     }
 
     if (home.isLoadingMore) {
-      secoes.add(_Secao.custom((context) => const Padding(
+      secoes.add(
+        _Secao.custom(
+          (context) => const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          )));
+          ),
+        ),
+      );
     }
 
     if (secoes.isEmpty) {
-      secoes.add(_Secao.custom((context) => _buildEmptyMessage(context, 'Nenhum produto encontrado')));
+      secoes.add(
+        _Secao.custom(
+          (context) => _buildEmptyMessage(context, 'Nenhum produto encontrado'),
+        ),
+      );
     }
     return secoes;
   }
@@ -330,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             clipBehavior: Clip.none,
             padding: EdgeInsets.only(left: context.w(AppSpacing.md)),
             itemCount: produtos.length,
-            separatorBuilder: (_, __) =>
+            separatorBuilder: (_, _) =>
                 SizedBox(width: context.w(AppSpacing.md)),
             itemBuilder: (context, index) {
               return AnimatedCardEntry(
@@ -354,74 +485,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ─── OFERTAS RELÂMPAGO ──────────────────────────────
-
-
-
-  Widget _buildBannersSection(
-    BuildContext context,
-    List<Map<String, dynamic>> banners,
-  ) {
-    return SizedBox(
-      height: context.h(150).clamp(120.0, 180.0),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: context.w(AppSpacing.md)),
-        itemCount: banners.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final b = banners[index];
-          return GestureDetector(
-            onTap: () => _abrirBanner(b),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.86,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CachedNetworkImage(
-                      imageUrl: b['imagem_url'] as String? ?? '',
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
-                        color: ThemeColors.surfaceVariant(context),
-                        child: const Icon(Icons.image_not_supported_rounded),
-                      ),
-                    ),
-                    if ((b['titulo'] as String?)?.trim().isNotEmpty == true)
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(14, 24, 14, 12),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black87],
-                            ),
-                          ),
-                          child: Text(
-                            b['titulo'] as String,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   Future<void> _abrirBanner(Map<String, dynamic> banner) async {
     final link = (banner['link_url'] as String?)?.trim() ?? '';
@@ -478,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             clipBehavior: Clip.none,
             padding: EdgeInsets.only(left: context.w(AppSpacing.md)),
             itemCount: produtos.length,
-            separatorBuilder: (_, __) =>
+            separatorBuilder: (_, _) =>
                 SizedBox(width: context.w(AppSpacing.md)),
             itemBuilder: (context, index) {
               return AnimatedCardEntry(
@@ -489,7 +552,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   onTap: () => ProductDetailScreen.push(
                     context,
                     produtos[index].id,
-                    imageUrl: produtos[index].urlImagem.isNotEmpty ? produtos[index].urlImagem.first : null,
+                    imageUrl: produtos[index].urlImagem.isNotEmpty
+                        ? produtos[index].urlImagem.first
+                        : null,
                   ),
                   onLongPress: () => _mostrarQuickView(produtos[index]),
                 ),
@@ -501,64 +566,56 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ─── CATEGORIAS (usado como bottomWidget do AppTopBar) ───
+  // ─── CATEGORIAS (header sticky dentro do CustomScrollView) ───
 
-  Widget _buildCategories(BuildContext context) {
-    final home = context.watch<HomeProvider>();
-    final categorias = home.categorias;
-    return Container(
-      margin: EdgeInsets.only(
-          bottom: context.w(AppSpacing.md),
-          left: context.w(AppSpacing.md),
-          right: context.w(AppSpacing.md)),
-      decoration: BoxDecoration(
-        color: ThemeColors.surface(context),
-        borderRadius: BorderRadius.circular(AppRadius.rLg(context)),
+  Widget _buildCategoriesCard(
+    BuildContext context, {
+    required List<Categoria> categorias,
+    required double cardHeight,
+    required double verticalPadding,
+  }) {
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: context.w(AppSpacing.md),
+        vertical: verticalPadding,
       ),
-      child: SizedBox(
-        height: context.h(104).clamp(88.0, 120.0),
-        child: ListView.separated(
-          controller: _categoryScrollController,
-          scrollDirection: Axis.horizontal,
-          padding: EdgeInsets.symmetric(
-              horizontal: context.w(AppSpacing.sm), vertical: context.h(AppSpacing.sm)),
-          itemCount: categorias.length + 1,
-          separatorBuilder: (_, __) =>
-              const SizedBox(width: AppSpacing.xs),
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return _buildCategoryItem(
-                'Todos',
-                Icons.grid_view_rounded,
-                isSelected: _selectedCategoriaId == null,
-                onTap: () {
-                  setState(() {
-                    _selectedCategoriaId = null;
-                    _loadedCategoriaId = null;
-                    _lastRefreshCount = -1;
-                  });
-                  _scrollToCategory(index);
-                },
-              );
-            }
-            if (categorias.isNotEmpty) {
-              final cat = categorias[index - 1];
-              return _buildCategoryItem(
-                cat.nome,
-                _getIconForCategory(cat.nome, cat.icone),
-                isSelected: _selectedCategoriaId == cat.id,
-                onTap: () {
-                  setState(() {
-                    _selectedCategoriaId = cat.id;
-                    _loadedCategoriaId = null;
-                    _lastRefreshCount = -1;
-                  });
-                  _scrollToCategory(index);
-                },
-              );
-            }
-            return const SizedBox.shrink();
-          },
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: ThemeColors.surface(context),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SizedBox(
+          height: cardHeight,
+          child: ListView.separated(
+            controller: _categoryScrollController,
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.symmetric(
+              horizontal: context.w(AppSpacing.sm),
+              vertical: context.h(AppSpacing.sm),
+            ),
+            itemCount: categorias.length + 1,
+            separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.xs),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return _buildCategoryItem(
+                  'Todos',
+                  Icons.grid_view_rounded,
+                  isSelected: _selectedCategoriaId == null,
+                  onTap: () => _selecionarCategoria(null, index),
+                );
+              }
+              if (categorias.isNotEmpty) {
+                final cat = categorias[index - 1];
+                return _buildCategoryItem(
+                  cat.nome,
+                  _getIconForCategory(cat.nome, cat.icone),
+                  isSelected: _selectedCategoriaId == cat.id,
+                  onTap: () => _selecionarCategoria(cat.id, index),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
         ),
       ),
     );
@@ -651,8 +708,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               useOldImageOnUrlChange: true,
                               fadeInDuration: Duration.zero,
                               fadeOutDuration: Duration.zero,
-                              placeholder: (_, __) => const SizedBox.shrink(),
-                              errorWidget: (_, __, ___) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
+                              placeholder: (_, _) => const SizedBox.shrink(),
+                              errorWidget: (_, _, _) => const Icon(Icons.image_outlined, size: 48, color: Color(0xFF9C9C9C)),
                             ),
                           );
                           if (i == 0) {
@@ -744,4 +801,53 @@ class _Secao {
       : titulo = null,
         subtitulo = null,
         produtos = null;
+}
+
+class _CategoriesStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double extent;
+  final Color backgroundColor;
+  final Widget child;
+
+  const _CategoriesStickyHeaderDelegate({
+    required this.extent,
+    required this.backgroundColor,
+    required this.child,
+  });
+
+  @override
+  double get minExtent => extent;
+
+  @override
+  double get maxExtent => extent;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final isPinned = shrinkOffset > 0 || overlapsContent;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        boxShadow: isPinned
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : const [],
+      ),
+      child: SizedBox.expand(child: child),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _CategoriesStickyHeaderDelegate oldDelegate) {
+    return oldDelegate.extent != extent ||
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.child != child;
+  }
 }
